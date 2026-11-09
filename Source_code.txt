@@ -1,0 +1,1672 @@
+
+# ================================================================
+# AGRILINK.AI
+# AI-POWERED AGRICULTURAL DECISION SUPPORT SYSTEM
+# SmartCrop + CropCare + MarketSense
+#
+# SINGLE-CELL GOOGLE COLAB PROJECT
+#
+# REAL DATASETS:
+# Crop recommendation, market prices and historical yield models use the supplied datasets.
+# Synthetic supplementary data is used only where the supplied datasets do not provide coverage.
+# ================================================================
+
+import sys
+
+# ------------------------- ERROR-ONLY FALLBACK OUTPUT -------------------------
+# This handler runs only when an unhandled exception occurs.
+# When the program runs normally, it produces no additional output.
+
+def _agrilink_fallback_output(shell, etype, evalue, traceback_object):
+    print("\n" + "=" * 72)
+    print("                 AGRILINK.AI — SYSTEM OUTPUT")
+    print("=" * 72)
+    print("\nThe requested analysis could not be completed fully.")
+    print("The system is displaying its general fallback output.")
+
+    print("SMARTCROP")
+    print("Crop suitability results are currently unavailable.")
+    print("Use locally suitable crops and soil-test recommendations.")
+
+    print("CROPCARE")
+    print("General crop-care guidance: follow locally recommended")
+    print("irrigation, nutrient, pest-management and harvesting practices.")
+
+    print("MARKETSENSE")
+    print("Market prices and financial estimates are currently unavailable.")
+    print("Check the latest local mandi prices before making a sale decision.")
+
+    print("\n" + "=" * 72)
+    print("                 THANK YOU FOR USING AGRILINK.AI")
+    print("=" * 72)
+    return []
+
+
+try:
+    _agrilink_ipython = get_ipython()
+    if _agrilink_ipython is not None:
+        _agrilink_ipython.set_custom_exc((BaseException,), _agrilink_fallback_output)
+    else:
+        sys.excepthook = lambda etype, value, tb: _agrilink_fallback_output(
+            None, etype, value, tb
+        )
+except BaseException:
+    sys.excepthook = lambda etype, value, tb: _agrilink_fallback_output(
+        None, etype, value, tb
+    )
+import subprocess
+import importlib.util
+import warnings
+import math
+import random
+import os
+import io
+import json
+import re
+import zipfile
+import urllib.request
+import urllib.parse
+import time
+import textwrap
+
+warnings.filterwarnings("ignore")
+
+# ------------------------- INSTALL PACKAGES -------------------------
+
+for package, module in [
+    ("numpy", "numpy"),
+    ("pandas", "pandas"),
+    ("scikit-learn", "sklearn"),
+    ("rapidfuzz", "rapidfuzz")
+]:
+    if importlib.util.find_spec(module) is None:
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "install", "-q", package
+        ])
+
+import numpy as np
+import pandas as pd
+
+from datetime import date, timedelta
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import train_test_split
+from rapidfuzz import process, fuzz
+
+# ------------------------- CONFIGURATION -------------------------
+
+SEED = 42
+
+rng = np.random.default_rng(SEED)
+random.seed(SEED)
+
+DATA_DIR = "/content/AgriLink.ai/datasets"
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# ------------------------- CROP DATABASE -------------------------
+
+CROPS = [
+    "Rice", "Wheat", "Maize", "Sorghum", "Pearl millet",
+    "Finger millet", "Barley", "Oats", "Chickpea", "Pigeon pea",
+    "Green gram", "Black gram", "Lentil", "Field pea",
+    "Kidney bean", "Soybean", "Groundnut", "Mustard",
+    "Sesame", "Sunflower", "Safflower", "Linseed", "Castor",
+    "Cotton", "Jute", "Sugarcane", "Potato", "Sweet potato",
+    "Cassava", "Onion", "Garlic", "Tomato", "Brinjal",
+    "Chilli", "Capsicum", "Cabbage", "Cauliflower", "Broccoli",
+    "Okra", "Cucumber", "Pumpkin", "Bottle gourd",
+    "Bitter gourd", "Ridge gourd", "Watermelon", "Muskmelon",
+    "Carrot", "Radish", "Beetroot", "Turnip", "Spinach",
+    "Amaranth", "Fenugreek", "Coriander", "Mint", "Banana",
+    "Mango", "Papaya", "Guava", "Citrus", "Lemon",
+    "Pomegranate", "Grapes", "Apple", "Pear", "Peach",
+    "Plum", "Litchi", "Pineapple", "Jackfruit", "Coconut",
+    "Arecanut", "Cashew", "Coffee", "Tea", "Turmeric",
+    "Ginger", "Black pepper", "Cardamom", "Clove", "Cocoa",
+    "Rubber", "Aloe vera", "Marigold", "Rose", "Jasmine",
+    "Tobacco", "Fodder maize", "Lucerne", "Berseem",
+    "Napier grass", "Quinoa", "Amaranth grain", "Moringa",
+    "Drumstick", "Strawberry", "Dragon fruit", "Avocado",
+    "Moth beans", "Orange"
+]
+
+
+# ------------------------- CROP FAMILY FALLBACK -------------------------
+# Defined before CropCare uses crop_to_family.
+
+crop_to_family = {}
+
+for crop in CROPS:
+    if crop in [
+        "Rice", "Wheat", "Maize", "Sorghum", "Pearl millet",
+        "Finger millet", "Barley", "Oats", "Fodder maize",
+        "Quinoa", "Amaranth grain", "Napier grass", "Lucerne", "Berseem"
+    ]:
+        crop_to_family[crop] = "cereals"
+
+    elif crop in [
+        "Chickpea", "Pigeon pea", "Green gram", "Black gram",
+        "Lentil", "Field pea", "Kidney bean", "Moth beans"
+    ]:
+        crop_to_family[crop] = "pulses"
+
+    elif crop in [
+        "Groundnut", "Mustard", "Sesame", "Sunflower", "Safflower",
+        "Linseed", "Castor", "Soybean"
+    ]:
+        crop_to_family[crop] = "oilseeds"
+
+    elif crop in ["Cotton", "Jute"]:
+        crop_to_family[crop] = "fibre"
+
+    elif crop in [
+        "Turmeric", "Ginger", "Black pepper", "Cardamom", "Clove"
+    ]:
+        crop_to_family[crop] = "spices"
+
+    elif crop in [
+        "Coffee", "Tea", "Rubber", "Coconut", "Arecanut", "Cocoa"
+    ]:
+        crop_to_family[crop] = "plantation"
+
+    elif crop in [
+        "Banana", "Mango", "Papaya", "Guava", "Citrus", "Lemon",
+        "Pomegranate", "Grapes", "Apple", "Pear", "Peach", "Plum",
+        "Litchi", "Pineapple", "Jackfruit", "Orange", "Strawberry",
+        "Dragon fruit", "Avocado", "Cashew", "Moringa", "Drumstick"
+    ]:
+        crop_to_family[crop] = "fruit_crops"
+
+    elif crop in [
+        "Watermelon", "Muskmelon", "Cucumber", "Pumpkin",
+        "Bottle gourd", "Bitter gourd", "Ridge gourd"
+    ]:
+        crop_to_family[crop] = "cucurbits"
+
+    elif crop in [
+        "Spinach", "Amaranth", "Fenugreek", "Coriander", "Mint"
+    ]:
+        crop_to_family[crop] = "leafy_herbs"
+
+    elif crop in ["Carrot", "Radish", "Beetroot", "Turnip"]:
+        crop_to_family[crop] = "root_vegetables"
+
+    elif crop in [
+        "Tomato", "Brinjal", "Chilli", "Capsicum", "Okra", "Potato",
+        "Sweet potato", "Cassava", "Tobacco", "Aloe vera"
+    ]:
+        crop_to_family[crop] = "other_field_and_vegetable_crops"
+
+    elif crop in [
+        "Onion", "Garlic", "Cabbage", "Cauliflower", "Broccoli"
+    ]:
+        crop_to_family[crop] = "vegetables"
+
+    elif crop in ["Marigold", "Rose", "Jasmine"]:
+        crop_to_family[crop] = "flowers"
+
+    else:
+        crop_to_family[crop] = "general"
+
+
+# ------------------------- SOIL DATABASE -------------------------
+
+SOILS = [
+    "Alluvial", "Black cotton soil", "Red soil",
+    "Laterite", "Sandy", "Loamy"
+]
+
+WATER_OPTIONS = ["Low", "Moderate", "High"]
+
+# ------------------------- LOCATION DATABASE -------------------------
+# Demonstration catalogue. Add more districts as required.
+
+STATE_DISTRICTS = {
+    # Complete South Indian district coverage using current government
+    # district-directory counts, including Andhra Pradesh's 2025 additions.
+    "Andhra Pradesh": [
+        "Alluri Sitharama Raju", "Anakapalli", "Ananthapuramu",
+        "Annamayya", "Bapatla", "Chittoor",
+        "Dr B R Ambedkar Konaseema", "East Godavari", "Eluru",
+        "Guntur", "Kakinada", "Krishna", "Kurnool", "Markapuram",
+        "Nandyal", "NTR", "Palnadu", "Parvathipuram Manyam",
+        "Polavaram", "Prakasam",
+        "Sri Potti Sriramulu Nellore", "Sri Sathya Sai", "Srikakulam",
+        "Tirupati", "Visakhapatnam", "Vizianagaram", "West Godavari",
+        "YSR Kadapa"
+    ],
+    "Arunachal Pradesh": ["Tawang", "Itanagar", "Lohit"],
+    "Assam": ["Guwahati", "Dibrugarh", "Jorhat", "Nagaon"],
+    "Bihar": ["Patna", "Gaya", "Muzaffarpur", "Darbhanga"],
+    "Chhattisgarh": ["Raipur", "Bilaspur", "Durg", "Bastar"],
+    "Goa": ["North Goa", "South Goa"],
+    "Gujarat": ["Ahmedabad", "Surat", "Rajkot", "Vadodara"],
+    "Haryana": ["Hisar", "Karnal", "Rohtak", "Gurugram"],
+    "Himachal Pradesh": ["Shimla", "Kangra", "Kullu", "Mandi"],
+    "Jharkhand": ["Ranchi", "Dhanbad", "Bokaro"],
+    "Karnataka": [
+        "Bagalkot", "Ballari", "Belagavi", "Bengaluru Rural",
+        "Bengaluru Urban", "Bidar", "Chamarajanagar",
+        "Chikkaballapura", "Chikkamagaluru", "Chitradurga",
+        "Dakshina Kannada", "Davanagere", "Dharwad", "Gadag",
+        "Hassan", "Haveri", "Kalaburagi", "Kodagu", "Kolar",
+        "Koppal", "Mandya", "Mysuru", "Raichur", "Bengaluru South",
+        "Shivamogga", "Tumakuru", "Udupi", "Uttara Kannada",
+        "Vijayapura", "Yadgir", "Vijayanagara"
+    ],
+    "Kerala": [
+        "Alappuzha", "Ernakulam", "Idukki", "Kannur", "Kasaragod",
+        "Kollam", "Kottayam", "Kozhikode", "Malappuram", "Palakkad",
+        "Pathanamthitta", "Thiruvananthapuram", "Thrissur", "Wayanad"
+    ],
+    "Madhya Pradesh": ["Bhopal", "Indore", "Jabalpur", "Ujjain"],
+    "Maharashtra": ["Pune", "Nashik", "Nagpur", "Kolhapur"],
+    "Manipur": ["Imphal East", "Imphal West", "Thoubal"],
+    "Meghalaya": ["Shillong", "Tura", "Jowai"],
+    "Mizoram": ["Aizawl", "Lunglei", "Champhai"],
+    "Nagaland": ["Dimapur", "Kohima", "Mokokchung"],
+    "Odisha": ["Cuttack", "Puri", "Ganjam", "Sambalpur"],
+    "Punjab": ["Amritsar", "Ludhiana", "Patiala", "Bathinda"],
+    "Rajasthan": ["Jaipur", "Jodhpur", "Kota", "Udaipur"],
+    "Sikkim": ["Gangtok", "Namchi", "Mangan"],
+    "Tamil Nadu": [
+        "Ariyalur", "Chengalpattu", "Chennai", "Coimbatore",
+        "Cuddalore", "Dharmapuri", "Dindigul", "Erode",
+        "Kallakurichi", "Kancheepuram", "Kanniyakumari", "Karur",
+        "Krishnagiri", "Madurai", "Mayiladuthurai", "Nagapattinam",
+        "Namakkal", "Perambalur", "Pudukkottai", "Ramanathapuram",
+        "Ranipet", "Salem", "Sivaganga", "Tenkasi", "Thanjavur",
+        "Theni", "Thoothukudi", "Tiruchirappalli", "Tirunelveli",
+        "Tirupathur", "Tiruppur", "Tiruvallur", "Tiruvannamalai",
+        "Tiruvarur", "Vellore", "Viluppuram", "Virudhunagar",
+        "Nilgiris"
+    ],
+    "Telangana": [
+        "Adilabad", "Bhadradri Kothagudem", "Hanumakonda", "Hyderabad",
+        "Jagitial", "Jangoan", "Jayashankar Bhupalpally",
+        "Jogulamba Gadwal", "Kamareddy", "Karimnagar", "Khammam",
+        "Kumuram Bheem Asifabad", "Mahabubabad", "Mahabubnagar", "Mancherial",
+        "Medak", "Medchal Malkajgiri", "Mulugu", "Nagarkurnool",
+        "Nalgonda", "Narayanpet", "Nirmal", "Nizamabad", "Peddapalli",
+        "Rajanna Sircilla", "Rangareddy", "Sangareddy", "Siddipet",
+        "Suryapet", "Vikarabad", "Wanaparthy", "Warangal",
+        "Yadadri Bhuvanagiri"
+    ],
+    "Tripura": ["Agartala", "Dhalai", "Gomati"],
+    "Uttar Pradesh": ["Lucknow", "Agra", "Kanpur", "Varanasi"],
+    "Uttarakhand": ["Dehradun", "Haridwar", "Nainital"],
+    "West Bengal": ["Kolkata", "Darjeeling", "Hooghly", "Nadia"],
+    "Delhi": ["New Delhi", "South Delhi", "North Delhi"],
+    "Jammu and Kashmir": ["Srinagar", "Jammu", "Anantnag"],
+    "Ladakh": ["Leh", "Kargil"],
+    "Puducherry": ["Karaikal", "Puducherry"],
+    "Andaman and Nicobar Islands": ["South Andaman", "Nicobar"],
+    "Lakshadweep": ["Lakshadweep"]
+}
+
+SOUTH_INDIA_DISTRICT_COUNTS = {
+    "Andhra Pradesh": 28,
+    "Telangana": 33,
+    "Karnataka": 31,
+    "Kerala": 14,
+    "Tamil Nadu": 38,
+    "Puducherry": 2,
+    "Lakshadweep": 1
+}
+
+for south_state, expected_count in SOUTH_INDIA_DISTRICT_COUNTS.items():
+    actual_count = len(STATE_DISTRICTS[south_state])
+    if actual_count != expected_count:
+        raise ValueError(
+            f"District catalogue mismatch for {south_state}: "
+            f"expected {expected_count}, found {actual_count}."
+        )
+
+
+STATE_ANCHORS = {
+    "Andhra Pradesh": (15.9, 79.7),
+    "Arunachal Pradesh": (28.0, 94.5),
+    "Assam": (26.2, 92.9),
+    "Bihar": (25.9, 85.1),
+    "Chhattisgarh": (21.3, 81.8),
+    "Goa": (15.4, 74.0),
+    "Gujarat": (22.3, 71.8),
+    "Haryana": (29.0, 76.1),
+    "Himachal Pradesh": (31.1, 77.2),
+    "Jharkhand": (23.6, 85.3),
+    "Karnataka": (15.3, 75.7),
+    "Kerala": (10.5, 76.3),
+    "Madhya Pradesh": (23.5, 78.5),
+    "Maharashtra": (19.7, 75.7),
+    "Manipur": (24.7, 93.9),
+    "Meghalaya": (25.5, 91.3),
+    "Mizoram": (23.2, 92.8),
+    "Nagaland": (26.1, 94.5),
+    "Odisha": (20.5, 84.4),
+    "Punjab": (31.0, 75.3),
+    "Rajasthan": (26.8, 73.8),
+    "Sikkim": (27.5, 88.5),
+    "Tamil Nadu": (11.1, 78.7),
+    "Telangana": (17.9, 79.1),
+    "Tripura": (23.8, 91.3),
+    "Uttar Pradesh": (26.8, 80.9),
+    "Uttarakhand": (30.1, 79.0),
+    "West Bengal": (23.5, 87.5),
+    "Delhi": (28.6, 77.2),
+    "Jammu and Kashmir": (33.8, 75.0),
+    "Ladakh": (34.2, 77.6),
+    "Puducherry": (11.9, 79.8),
+    "Andaman and Nicobar Islands": (11.7, 92.7),
+    "Lakshadweep": (10.6, 72.6)
+}
+
+# ------------------------- CROP GROUPS -------------------------
+
+CROP_GROUPS = {
+    "water_high": [
+        "Rice", "Sugarcane", "Banana", "Coconut", "Jute"
+    ],
+    "dry": [
+        "Sorghum", "Pearl millet", "Finger millet", "Barley",
+        "Chickpea", "Pigeon pea", "Groundnut", "Sesame",
+        "Castor", "Safflower"
+    ],
+    "cool": [
+        "Wheat", "Barley", "Oats", "Lentil", "Apple",
+        "Peach", "Plum", "Potato", "Cabbage", "Cauliflower"
+    ],
+    "hort": [
+        "Tomato", "Brinjal", "Chilli", "Capsicum", "Onion",
+        "Garlic", "Okra", "Cucumber", "Pumpkin", "Watermelon",
+        "Papaya", "Guava", "Mango", "Citrus", "Pomegranate",
+        "Grapes"
+    ]
+}
+
+# Only use crop names that actually exist in CROPS.
+for group in CROP_GROUPS:
+    CROP_GROUPS[group] = [
+        crop for crop in CROP_GROUPS[group] if crop in CROPS
+    ]
+
+CROP_WATER = {
+    crop: (
+        "High" if crop in CROP_GROUPS["water_high"]
+        else "Low" if crop in CROP_GROUPS["dry"]
+        else "Moderate"
+    )
+    for crop in CROPS
+}
+
+# Crop requirement profiles used by the prototype suitability engine.
+# These are illustrative starter profiles, not validated local recommendations.
+# Replace them with region-specific ICAR/SAU/agronomy data before deployment.
+CROP_PROFILES = {
+    "Castor": {"soils": ["Sandy", "Red soil", "Loamy"], "ph": 6.2, "temp": 27, "rain": 550, "water": "Low", "n": 55, "p": 35, "k": 45},
+    "Chickpea": {"soils": ["Loamy", "Alluvial", "Black cotton soil"], "ph": 7.0, "temp": 20, "rain": 500, "water": "Low", "n": 35, "p": 45, "k": 35},
+    "Finger millet": {"soils": ["Red soil", "Laterite", "Loamy"], "ph": 6.0, "temp": 25, "rain": 700, "water": "Low", "n": 45, "p": 30, "k": 35},
+    "Groundnut": {"soils": ["Sandy", "Red soil", "Loamy"], "ph": 6.2, "temp": 27, "rain": 650, "water": "Low", "n": 35, "p": 45, "k": 55},
+    "Pearl millet": {"soils": ["Sandy", "Loamy", "Red soil"], "ph": 7.0, "temp": 30, "rain": 450, "water": "Low", "n": 40, "p": 25, "k": 30},
+    "Pigeon pea": {"soils": ["Black cotton soil", "Loamy", "Red soil"], "ph": 6.5, "temp": 26, "rain": 750, "water": "Low", "n": 35, "p": 40, "k": 35},
+    "Safflower": {"soils": ["Black cotton soil", "Loamy", "Red soil"], "ph": 7.0, "temp": 22, "rain": 500, "water": "Low", "n": 40, "p": 35, "k": 35},
+    "Sesame": {"soils": ["Sandy", "Red soil", "Loamy"], "ph": 6.5, "temp": 29, "rain": 500, "water": "Low", "n": 35, "p": 30, "k": 35},
+    "Sorghum": {"soils": ["Black cotton soil", "Loamy", "Red soil"], "ph": 6.5, "temp": 28, "rain": 600, "water": "Low", "n": 50, "p": 30, "k": 35},
+    "Barley": {"soils": ["Loamy", "Alluvial", "Sandy"], "ph": 7.2, "temp": 18, "rain": 450, "water": "Low", "n": 60, "p": 30, "k": 30},
+    "Rice": {"soils": ["Alluvial", "Loamy", "Black cotton soil"], "ph": 6.0, "temp": 27, "rain": 1200, "water": "High", "n": 100, "p": 45, "k": 45},
+    "Wheat": {"soils": ["Alluvial", "Loamy", "Black cotton soil"], "ph": 7.0, "temp": 20, "rain": 550, "water": "Moderate", "n": 90, "p": 40, "k": 40},
+    "Maize": {"soils": ["Loamy", "Alluvial", "Red soil"], "ph": 6.3, "temp": 25, "rain": 700, "water": "Moderate", "n": 90, "p": 45, "k": 40},
+    "Soybean": {"soils": ["Black cotton soil", "Loamy", "Alluvial"], "ph": 6.5, "temp": 25, "rain": 750, "water": "Moderate", "n": 40, "p": 50, "k": 50},
+    "Mustard": {"soils": ["Loamy", "Alluvial", "Sandy"], "ph": 7.0, "temp": 20, "rain": 400, "water": "Low", "n": 65, "p": 35, "k": 30},
+    "Cotton": {"soils": ["Black cotton soil", "Loamy", "Alluvial"], "ph": 7.0, "temp": 28, "rain": 700, "water": "Moderate", "n": 80, "p": 40, "k": 45},
+    "Sugarcane": {"soils": ["Alluvial", "Loamy", "Black cotton soil"], "ph": 6.5, "temp": 28, "rain": 1400, "water": "High", "n": 120, "p": 50, "k": 80},
+    "Potato": {"soils": ["Loamy", "Sandy", "Alluvial"], "ph": 5.8, "temp": 18, "rain": 600, "water": "Moderate", "n": 100, "p": 50, "k": 100},
+    "Onion": {"soils": ["Loamy", "Alluvial", "Sandy"], "ph": 6.5, "temp": 22, "rain": 500, "water": "Moderate", "n": 80, "p": 40, "k": 60},
+    "Tomato": {"soils": ["Loamy", "Alluvial", "Red soil"], "ph": 6.2, "temp": 24, "rain": 650, "water": "Moderate", "n": 90, "p": 45, "k": 70}
+}
+
+# Fallback profiles are explicitly synthetic screening envelopes, not field measurements.
+# The 20 profiles above remain the existing curated starter profiles. For other crops,
+# a crop-family envelope is varied deterministically by crop name so all 100 classes
+# have distinct feature distributions without overwriting any real observations.
+def get_crop_profile(crop):
+    if crop in CROP_PROFILES:
+        profile = dict(CROP_PROFILES[crop])
+        profile.setdefault("humidity", 72 if profile.get("water") == "High" else 62)
+        return profile, True
+
+    if crop in CROP_GROUPS["water_high"]:
+        family, water, temp, rain, humidity = "water", "High", 27, 1150, 78
+        soils = ["Alluvial", "Loamy", "Black cotton soil"]
+    elif crop in CROP_GROUPS["dry"]:
+        family, water, temp, rain, humidity = "dry", "Low", 27, 560, 48
+        soils = ["Red soil", "Sandy", "Loamy"]
+    elif crop in CROP_GROUPS["cool"]:
+        family, water, temp, rain, humidity = "cool", "Moderate", 19, 650, 60
+        soils = ["Loamy", "Alluvial", "Sandy"]
+    elif crop in CROP_GROUPS["hort"]:
+        family, water, temp, rain, humidity = "hort", "Moderate", 25, 820, 68
+        soils = ["Loamy", "Red soil", "Alluvial"]
+    else:
+        family, water, temp, rain, humidity = "general", "Moderate", 25, 780, 64
+        soils = ["Loamy", "Red soil", "Laterite"]
+
+    stable_seed = sum((index + 1) * ord(char) for index, char in enumerate(crop))
+    profile = {
+        "soils": soils,
+        "ph": round(5.7 + (stable_seed % 17) * 0.085, 2),
+        "temp": round(temp + ((stable_seed % 9) - 4) * 0.55, 1),
+        "rain": round(rain * (0.82 + (stable_seed % 37) / 100), 1),
+        "humidity": int(np.clip(humidity + (stable_seed % 19) - 9, 35, 92)),
+        "water": water,
+        "n": int(np.clip(38 + stable_seed % 83, 20, 130)),
+        "p": int(np.clip(24 + (stable_seed // 7) % 47, 15, 90)),
+        "k": int(np.clip(26 + (stable_seed // 13) % 66, 15, 110))
+    }
+    return profile, False
+
+CROP_DURATION = {
+    crop: int(rng.integers(75, 180))
+    for crop in CROPS
+}
+
+for crop in [
+    "Sugarcane", "Coconut", "Arecanut", "Tea", "Coffee",
+    "Rubber", "Apple", "Mango", "Cashew", "Jackfruit"
+]:
+    CROP_DURATION[crop] = int(rng.integers(240, 420))
+
+
+# ------------------------- LOAD PRECOMPUTED GITHUB BUNDLE -------------------------
+
+import joblib
+
+GITHUB_OWNER = "Mohan-Sai-Karthikeya101"
+GITHUB_REPO = "AgriLink.ai"
+GITHUB_BUNDLE_FILENAME = "agrilink_precomputed_bundle.joblib"
+
+bundle_path = os.path.join(DATA_DIR, GITHUB_BUNDLE_FILENAME)
+
+if not os.path.exists(bundle_path):
+    api_url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}"
+    api_request = urllib.request.Request(
+        api_url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "AgriLink.ai"
+        }
+    )
+    with urllib.request.urlopen(api_request, timeout=30) as response:
+        repository_info = json.loads(response.read().decode("utf-8"))
+
+    branch = repository_info["default_branch"]
+    GITHUB_BUNDLE_URL = (
+        f"https://raw.githubusercontent.com/{GITHUB_OWNER}/"
+        f"{GITHUB_REPO}/{urllib.parse.quote(branch)}/"
+        f"{urllib.parse.quote(GITHUB_BUNDLE_FILENAME)}"
+    )
+    request = urllib.request.Request(
+        GITHUB_BUNDLE_URL,
+        headers={"User-Agent": "AgriLink.ai"}
+    )
+    with urllib.request.urlopen(request, timeout=120) as response:
+        with open(bundle_path, "wb") as bundle_file:
+            bundle_file.write(response.read())
+
+precomputed_bundle = joblib.load(bundle_path)
+
+X = precomputed_bundle["X"]
+crop_df = precomputed_bundle["crop_df"]
+crop_real_df = precomputed_bundle["crop_real_df"]
+crop_synthetic_df = precomputed_bundle["crop_synthetic_df"]
+crop_feature_columns = precomputed_bundle["crop_feature_columns"]
+crop_encoder = precomputed_bundle["crop_encoder"]
+crop_model = precomputed_bundle["crop_model"]
+upag_df = precomputed_bundle["upag_df"]
+wide_yield_df = precomputed_bundle["wide_yield_df"]
+yield_model = precomputed_bundle["yield_model"]
+UPAG_CROP_MAP = precomputed_bundle["UPAG_CROP_MAP"]
+rain_df = precomputed_bundle["rain_df"]
+calendar_df = precomputed_bundle["calendar_df"]
+markets_df = precomputed_bundle["markets_df"]
+market_price_rows = precomputed_bundle["market_price_rows"]
+guidelines_df = precomputed_bundle["guidelines_df"]
+datasets = precomputed_bundle["datasets"]
+rng = precomputed_bundle["rng"]
+
+for filename, df in datasets.items():
+    df.to_csv(
+        os.path.join(DATA_DIR, filename),
+        index=False
+    )
+
+
+def estimate_real_yield_tonnes_per_acre(crop, selected_state, selected_district):
+
+    # Prefer the optional wide-format real dataset when it contains a district-level
+    # yield explicitly measured in tonnes/hectare. Nuts and bales are never converted
+    # to tonnes without a crop-specific physical conversion factor.
+    if not wide_yield_df.empty:
+        wide_crop_rows = wide_yield_df[
+            (wide_yield_df["crop_name"].astype(str).str.casefold() == crop.casefold())
+            & wide_yield_df["yield_tonnes_per_hectare"].notna()
+            & (wide_yield_df["yield_tonnes_per_hectare"] > 0)
+        ].copy()
+        normalize_location = lambda value: re.sub(r"^\s*\d+\.\s*", "", str(value)).strip().casefold()
+        exact_district_rows = wide_crop_rows[
+            wide_crop_rows["district_name"].map(normalize_location) == normalize_location(selected_district)
+        ]
+        if not exact_district_rows.empty:
+            latest_year = exact_district_rows["year_start"].max()
+            recent_rows = exact_district_rows[
+                exact_district_rows["year_start"] >= latest_year - 2
+            ]
+            return max(0.0, float(recent_rows["yield_tonnes_per_hectare"].median()) / 2.47105)
+
+    upag_crop = UPAG_CROP_MAP.get(crop)
+    if not upag_crop:
+        return None
+
+    matching_crop = upag_df[
+        upag_df["crop_name"].astype(str).str.casefold() == upag_crop.casefold()
+    ].copy()
+
+    if matching_crop.empty:
+        return None
+
+    state_rows = matching_crop[
+        matching_crop["state_name"].astype(str).str.casefold()
+        == selected_state.casefold()
+    ]
+    if not state_rows.empty:
+        matching_crop = state_rows
+
+    district_rows = matching_crop[
+        matching_crop["district_name"].astype(str).str.casefold()
+        == selected_district.casefold()
+    ]
+    if not district_rows.empty:
+        matching_crop = district_rows
+
+    chosen_state = str(matching_crop["state_name"].mode().iloc[0])
+    chosen_district = str(matching_crop["district_name"].mode().iloc[0])
+    reference_area = float(matching_crop["area"].median())
+    prediction_year = int(upag_df["year_start"].max())
+    available_seasons = sorted(upag_df["season"].dropna().astype(str).unique())
+
+    prediction_rows = pd.DataFrame([
+        {
+            "state_name": chosen_state,
+            "district_name": chosen_district,
+            "crop_name": upag_crop,
+            "season": season,
+            "year_start": prediction_year,
+            "area": reference_area
+        }
+        for season in available_seasons
+    ])
+
+    predicted_kg_per_hectare = float(
+        np.mean(yield_model.predict(prediction_rows))
+    )
+
+    # The supplied normalized UPAG long-format file stores yield in kg/hectare.
+    # This conversion is valid for its tonne-based crop records; non-tonne crops
+    # (e.g. nuts/bales in separate wide-format tables) must not be merged without
+    # a unit conversion table.
+    return max(0.0, predicted_kg_per_hectare / 1000.0 / 2.47105)
+
+# ------------------------- INPUT HELPERS -------------------------
+
+def best_match(value, choices):
+
+    # Normalize both the user's entry and database choices so matching is
+    # case-insensitive and tolerant of extra spaces and spelling mistakes.
+    normalized_value = " ".join(str(value).casefold().split())
+    normalized_choices = [
+        " ".join(str(choice).casefold().split())
+        for choice in choices
+    ]
+
+    match = process.extractOne(
+        normalized_value,
+        normalized_choices,
+        scorer=fuzz.WRatio
+    )
+
+    if match:
+        return choices[match[2]]
+
+    return choices[0]
+
+
+def ask_float(prompt, low, high, suffix=""):
+
+    while True:
+
+        raw = input(
+            f"{prompt} [{low}-{high}]{suffix}: "
+        ).strip()
+
+        try:
+            value = float(raw)
+
+            if low <= value <= high:
+                return value
+
+        except ValueError:
+            pass
+
+        print(
+            f"Please enter a number between {low} and {high}."
+        )
+
+
+def ask_choice(prompt, choices):
+
+    print("\n" + prompt)
+
+    print(" | ".join(choices))
+
+    raw = input("Your choice: ").strip()
+
+    return best_match(raw, choices)
+
+
+def haversine_km(lat1, lon1, lat2, lon2):
+
+    r = 6371
+
+    p1 = math.radians(lat1)
+    p2 = math.radians(lat2)
+
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+
+    a = (
+        math.sin(dp / 2) ** 2
+        + math.cos(p1) * math.cos(p2)
+        * math.sin(dl / 2) ** 2
+    )
+
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def month_name(month):
+
+    return date(
+        2026, int(month), 1
+    ).strftime("%B")
+
+
+# ------------------------- FARMER INPUT -------------------------
+
+print("\n" + "=" * 72)
+print("                         AGRILINK.AI")
+print("       AI-POWERED AGRICULTURAL DECISION SUPPORT SYSTEM")
+print("=" * 72)
+
+print("\nEnter your farm details.")
+
+state = best_match(
+    input("\nState: "),
+    list(STATE_DISTRICTS.keys())
+)
+
+district = best_match(
+    input("District: "),
+    STATE_DISTRICTS[state]
+)
+
+soil = ask_choice("Select soil type:", SOILS)
+
+ph = ask_float("Soil pH", 0, 14)
+
+nitrogen = ask_float(
+     "Nitrogen (kg/ha)", 0, 200
+)
+
+phosphorus = ask_float(
+     "Phosphorus (kg/ha)", 0, 200
+)
+
+potassium = ask_float(
+     "Potassium (kg/ha)", 0, 250
+)
+
+temperature = ask_float(
+    "Average temperature", 0, 50, " (Celsius)"
+)
+
+water = ask_choice(
+    "Water availability:", WATER_OPTIONS
+)
+
+land_acres = ask_float(
+    "Available land (acres)", 0.05, 10000
+)
+
+lat, lon = STATE_ANCHORS[state]
+
+print(f"\nLocation selected: {district}, {state}")
+
+# ================================================================
+# MODULE 1: SMARTCROP
+# ================================================================
+
+soil_warnings = []
+
+if ph < 5.5:
+    soil_warnings.append((
+        f"Soil pH is too low ({ph:.1f} — acidic).",
+        "Remedy: Apply agricultural lime based on a soil-test recommendation."
+    ))
+elif ph > 7.5:
+    soil_warnings.append((
+        f"Soil pH is too high ({ph:.1f} — alkaline).",
+        "Remedy: Use elemental sulphur only at a soil-test-based rate; improve organic matter."
+    ))
+
+for nutrient, value, label, remedy_low, remedy_high in [
+    ("nitrogen", nitrogen, "Nitrogen", "Remedy: Incorporate urea into moist soil at the recommended rate.", "Remedy: Stop nitrogen fertilizer applications; avoid adding more nitrogen."),
+    ("phosphorus", phosphorus, "Phosphorus", "Remedy: Apply single superphosphate (SSP) at the soil-test-based rate.", "Remedy: Avoid phosphate fertilizers until a soil test shows the level has fallen."),
+    ("potassium", potassium, "Potassium", "Remedy: Apply muriate of potash (MOP) at the soil-test-based rate.", "Remedy: Avoid potash fertilizers until a soil test shows the level has fallen.")
+]:
+    low_limit = float(crop_df[nutrient].quantile(0.10))
+    high_limit = float(crop_df[nutrient].quantile(0.90))
+    if value < low_limit:
+        soil_warnings.append((
+            f"{label} is low ({value:.1f} kg/ha).",
+            remedy_low
+        ))
+    elif value > high_limit:
+        soil_warnings.append((
+            f"{label} is high ({value:.1f} kg/ha).",
+            remedy_high
+        ))
+
+if soil_warnings:
+    box_width = max(76, max(len(warning) for warning, _ in soil_warnings) + 6,
+                    max(len(remedy) for _, remedy in soil_warnings) + 6)
+    border = "-" * (box_width - 2)
+    heading = "SOIL HEALTH ALERT"
+    subtitle = "Check these values before planting"
+
+    print("\n|" + border + "|")
+    print("|" + heading.center(box_width - 2) + "|")
+    print("|" + subtitle.center(box_width - 2) + "|")
+    print("|" + border + "|")
+
+    for index, (warning, remedy) in enumerate(soil_warnings):
+        print("| " + warning.ljust(box_width - 4) + " |")
+        print("| " + remedy.ljust(box_width - 4) + " |")
+        if index < len(soil_warnings) - 1:
+            print("|".ljust(box_width - 1) + "|")
+
+    print("|" + border + "|\n")
+
+print("\n" + "=" * 72)
+print("CROP RECOMMENDATIONS FOR YOUR FARM".center(72))
+print("=" * 72)
+
+district_rain = rain_df[
+    (rain_df.state == state)
+    & (rain_df.district == district)
+]
+
+dataset_crop_profiles = (
+    crop_df.groupby("crop")[crop_feature_columns]
+    .mean()
+    .to_dict("index")
+)
+
+# pH 10 is a valid numeric soil-pH input (though strongly alkaline). The
+# classifier is kept within its observed training range to avoid extrapolation;
+# the actual entered pH is still used in the agronomic compatibility score.
+ph_model_value = float(np.clip(
+    ph, float(crop_df["ph"].min()), float(crop_df["ph"].max())
+))
+
+ranked = []
+
+for crop in crop_encoder.classes_:
+    profile, has_crop_profile = get_crop_profile(crop)
+    data_profile = dataset_crop_profiles[crop]
+
+    candidate_input = pd.DataFrame([{
+        "nitrogen": nitrogen,
+        "phosphorus": phosphorus,
+        "potassium": potassium,
+        "temperature_c": temperature,
+        "humidity": float(data_profile["humidity"]),
+        "ph": ph_model_value,
+        "rainfall_mm": float(data_profile["rainfall_mm"])
+    }], columns=X.columns)
+
+    candidate_probabilities = crop_model.predict_proba(candidate_input)[0]
+    crop_class_index = int(np.where(crop_encoder.classes_ == crop)[0][0])
+    ml_score = float(candidate_probabilities[crop_class_index]) * 100
+
+    # Use real training-data averages for the features learned by the classifier.
+    profile = {
+        **profile,
+        "n": float(data_profile["nitrogen"]),
+        "p": float(data_profile["phosphorus"]),
+        "k": float(data_profile["potassium"]),
+        "ph": float(data_profile["ph"]),
+        "temp": float(data_profile["temperature_c"]),
+        "rain": float(data_profile["rainfall_mm"]),
+        "humidity": float(data_profile["humidity"])
+    }
+
+    soil_score = 100 if soil in profile["soils"] else 48
+    ph_distance = max(0.0, abs(ph - profile["ph"]) - 0.35)
+    ph_score = max(0.0, 100 - ph_distance * 16)
+
+    temp_distance = abs(temperature - profile["temp"])
+    temperature_score = max(0.0, 100 - temp_distance * 4.0)
+
+    water_score = 100 if water == profile["water"] else 58
+
+    def nutrient_match(actual, target):
+        return max(0.0, 100 - abs(actual - target) / max(target, 1) * 65)
+
+    nutrient_score = float(np.mean([
+        nutrient_match(nitrogen, profile["n"]),
+        nutrient_match(phosphorus, profile["p"]),
+        nutrient_match(potassium, profile["k"])
+    ]))
+
+    compatibility_score = (
+        0.20 * soil_score
+        + 0.20 * ph_score
+        + 0.20 * temperature_score
+        + 0.10 * water_score
+        + 0.30 * nutrient_score
+    )
+
+    # The ML model still receives all seven trained features; humidity and
+    # rainfall are supplied from this crop's real training-data averages.
+    final_score = 0.55 * ml_score + 0.45 * compatibility_score
+
+    ranked.append((crop, min(100.0, final_score)))
+ranked.sort(
+    key=lambda item: item[1],
+    reverse=True
+)
+
+print("\n" + f"{'TOP 10 SUITABLE CROPS':<30}{'Suitability score (%)':^24}")
+
+for i, (crop, score) in enumerate(ranked[:10], 1):
+
+    print(
+        f"{i:2}. {crop:<26}{f'{score:.1f}%':^24}"
+    )
+
+top_crops = ranked[:10]
+
+top_crop_names = [crop for crop, _ in top_crops]
+
+while True:
+    crop_choice = input(
+        "\nEnter one of the recommended crops you want to explore: "
+    ).strip()
+
+    if not crop_choice:
+        print("Please enter at least one letter of a recommended crop name.")
+        continue
+
+    # Match case-insensitively and tolerate partial names and spelling errors.
+    # The match is always selected from the ten crops displayed above.
+    normalized_choice = " ".join(crop_choice.casefold().split())
+    normalized_top_names = [name.casefold() for name in top_crop_names]
+    crop_match = max(
+        (process.extractOne(normalized_choice, normalized_top_names, scorer=scorer)
+         for scorer in (fuzz.WRatio, fuzz.partial_ratio, fuzz.ratio)),
+        key=lambda match: match[1] if match else -1
+    )
+
+    if crop_match:
+        selected_crop = top_crop_names[crop_match[2]]
+        if crop_choice.casefold() != selected_crop.casefold():
+            print(f"Closest recommended crop matched: {selected_crop}")
+        break
+
+crop_rows = calendar_df[
+    (calendar_df.state == state)
+    & (calendar_df.district == district)
+    & (calendar_df.crop == selected_crop)
+]
+
+if crop_rows.empty:
+    raise ValueError(
+        "No crop calendar data found for this selection."
+    )
+
+# Use the selected crop's average rainfall from the real training dataset as
+# its rainfall requirement when comparing the available sowing months.
+crop_average_rainfall = float(
+    dataset_crop_profiles[selected_crop]["rainfall_mm"]
+)
+monthly_district_rainfall = (
+    district_rain.groupby("month")["rainfall_mm"].mean().to_dict()
+)
+
+def expected_seasonal_rainfall(sowing_month, crop_duration_days):
+    month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    remaining_days = int(crop_duration_days)
+    month = int(sowing_month)
+    total_rainfall = 0.0
+
+    while remaining_days > 0:
+        days_in_month = month_days[month - 1]
+        days_in_period = min(remaining_days, days_in_month)
+        monthly_average = float(
+            monthly_district_rainfall.get(
+                month, district_rain["rainfall_mm"].mean()
+            )
+        )
+        total_rainfall += monthly_average * days_in_period / days_in_month
+        remaining_days -= days_in_period
+        month = month % 12 + 1
+
+    return total_rainfall
+
+crop_rows = crop_rows.copy()
+crop_rows["expected_seasonal_rainfall_mm"] = crop_rows.apply(
+    lambda row: expected_seasonal_rainfall(
+        int(row.sowing_month), int(row.duration_days)
+    ),
+    axis=1
+)
+
+crop_rows["rainfall_suitability"] = crop_rows[
+    "expected_seasonal_rainfall_mm"
+].apply(
+    lambda value: max(
+        0.0,
+        1.0 - abs(float(value) - crop_average_rainfall)
+        / max(crop_average_rainfall, 1.0)
+    )
+)
+
+real_yield_per_acre = estimate_real_yield_tonnes_per_acre(
+    selected_crop, state, district
+)
+
+if real_yield_per_acre is not None:
+    calendar_average = float(
+        crop_rows["synthetic_yield_tonnes_per_acre"].mean()
+    )
+    crop_rows = crop_rows.copy()
+    crop_rows["estimated_yield_tonnes_per_acre"] = (
+        real_yield_per_acre
+        * crop_rows["synthetic_yield_tonnes_per_acre"]
+        / max(calendar_average, 1e-9)
+    )
+else:
+    crop_rows = crop_rows.copy()
+    crop_rows["estimated_yield_tonnes_per_acre"] = (
+        crop_rows["synthetic_yield_tonnes_per_acre"]
+    )
+
+# Give rainfall alignment a limited influence on the estimated sowing-month yield.
+crop_rows["estimated_yield_tonnes_per_acre"] *= (
+    0.70 + 0.30 * crop_rows["rainfall_suitability"]
+)
+
+best_months = crop_rows.sort_values(
+    "estimated_yield_tonnes_per_acre",
+    ascending=False
+).head(4)
+
+best_sowing_month = int(
+    best_months.iloc[0].sowing_month
+)
+
+duration = int(
+    best_months.iloc[0].duration_days
+)
+
+estimated_yield_per_acre = float(
+    best_months.iloc[0].estimated_yield_tonnes_per_acre
+)
+
+total_yield = estimated_yield_per_acre * land_acres
+
+today = date.today()
+
+sowing_year = (
+    today.year
+    if best_sowing_month >= today.month
+    else today.year + 1
+)
+
+sowing_date = date(
+    sowing_year, best_sowing_month, 15
+)
+
+harvest_date = (
+    sowing_date + timedelta(days=duration)
+)
+
+print(f"\nSELECTED CROP: {selected_crop}")
+
+print(
+    f"Estimated yield per acre: "
+    f"{estimated_yield_per_acre:.2f} tonnes"
+)
+
+print(
+    f"Estimated yield for {land_acres:.2f} acres: "
+    f"{total_yield:.2f} tonnes"
+)
+
+# ================================================================
+# MODULE 2: CROPCARE
+# ================================================================
+
+print("\n" + "=" * 72)
+print("HOW TO GROW AND CARE FOR YOUR CROP".center(72))
+print("=" * 72)
+
+guide = guidelines_df[
+    guidelines_df.crop == selected_crop
+].iloc[0]
+
+print(
+    f"\nCULTIVATION GUIDELINES — {selected_crop}\n"
+)
+
+sections = [
+    ("1. Land preparation", "land_preparation"),
+    ("2. Fertilizer application", "fertilizer_application"),
+    ("3. Nutrient guidance", "nutrient_guidance"),
+    ("4. Crop monitoring", "monitoring"),
+    ("5. Common diseases — symptoms and prevention", "common_diseases"),
+    ("6. Common pests — damage and prevention", "common_pests"),
+    ("7. Integrated pest management", "ipm_guidance")
+]
+
+
+def concise_guideline(value, section):
+    """Keep guidance useful and brief, while wrapping long lines cleanly."""
+    value = str(value).strip()
+
+    if section in {"common_diseases", "common_pests"}:
+        formatted = []
+        for item in value.splitlines():
+            item = item.strip().lstrip("• ")
+            if not item:
+                continue
+            if "Prevention/management:" in item:
+                name, details = item.split(":", 1)
+                symptoms, management = details.split("Prevention/management:", 1)
+                symptom_sentence = re.split(r"(?<=[.!?])\s+", symptoms.strip())[0]
+                management_sentence = re.split(r"(?<=[.!?])\s+", management.strip())[0]
+                short_item = (
+                    f"{name}: {symptom_sentence} "
+                    f"Prevention: {management_sentence}"
+                )
+            else:
+                short_item = item
+            formatted.append(textwrap.fill(
+                short_item, width=88, initial_indent="  • ",
+                subsequent_indent="    "
+            ) + "\n")
+        return "\n".join(formatted)
+
+    # Keep the first two practical sentences for the other guidance sections.
+    sentences = re.split(r"(?<=[.!?])\s+", value)
+    short_text = " ".join(sentences[:2]).strip()
+    return textwrap.fill(short_text, width=88, subsequent_indent="  ")
+
+
+# Display each cultivation point heading in uppercase and centered.
+GUIDELINE_HEADING_WIDTH = 88
+
+for heading, column in sections:
+    print("\n" + heading.upper().center(GUIDELINE_HEADING_WIDTH))
+    print()
+    print(concise_guideline(guide[column], column) + "\n")
+
+# Storage is point 8; advice varies by the crop's harvested produce.
+family = crop_to_family.get(selected_crop, "general")
+if selected_crop in {"Potato", "Sweet potato", "Cassava"}:
+    storage_advice = (
+        "Sort out cut, diseased and damaged roots/tubers. Cure only as appropriate "
+        "for the crop, then store in a cool, dark, dry, well-ventilated place; "
+        "protect from direct sunlight and rodents."
+    )
+elif selected_crop in {"Onion", "Garlic"}:
+    storage_advice = (
+        "Cure bulbs/cloves in a dry, shaded, well-ventilated place until necks and "
+        "outer skins are dry. Remove damaged bulbs and store in mesh bags or "
+        "ventilated crates away from moisture."
+    )
+elif family in {"cereals", "pulses", "oilseeds", "fibre"}:
+    storage_advice = (
+        "Dry the harvested produce to the locally recommended safe storage "
+        "moisture before bagging. Store in clean, dry, pest-proof bins or bags, "
+        "raised off the floor and protected from rain and rodents."
+    )
+elif family in {"spices", "plantation"}:
+    storage_advice = (
+        "Dry or cure the harvested produce to the crop's recommended safe "
+        "moisture. Store in clean, airtight, moisture-proof packaging in a cool, "
+        "dry place; check regularly for mould or insects."
+    )
+elif family in {"fruit_crops", "cucurbits"}:
+    storage_advice = (
+        "Keep harvested produce in shade, remove damaged items and use clean, "
+        "ventilated crates. Cool promptly and store at the crop-appropriate "
+        "temperature; avoid chilling-sensitive conditions."
+    )
+elif family in {"leafy_herbs", "root_vegetables", "solanaceous", "brassicas"}:
+    storage_advice = (
+        "Remove damaged produce, keep it clean and out of direct sun, and cool "
+        "promptly. Use clean ventilated crates and crop-appropriate cool storage; "
+        "avoid excess moisture and crushing."
+    )
+else:
+    storage_advice = (
+        "Clean and grade the produce, remove damaged material, and keep it dry, "
+        "shaded and well ventilated. Use clean containers and the crop-appropriate "
+        "storage temperature and humidity."
+    )
+
+print("8. STORAGE GUIDANCE".center(GUIDELINE_HEADING_WIDTH))
+print()
+print(textwrap.fill(storage_advice, width=88, subsequent_indent="  ") + "\n")
+
+# Give the farmer a separate, crop-specific harvest instruction in its own box.
+harvest_text = concise_guideline(
+    guide["harvest_guidance"], "harvest_guidance"
+).strip()
+harvest_box_width = GUIDELINE_HEADING_WIDTH
+harvest_inner_width = harvest_box_width - 4
+harvest_lines = textwrap.wrap(
+    harvest_text, width=harvest_inner_width,
+    break_long_words=False, break_on_hyphens=False
+)
+print("+" + "-" * (harvest_box_width - 2) + "+")
+print("|" + " HARVESTING ADVICE ".center(harvest_box_width - 2) + "|")
+print("|" + " " * (harvest_box_width - 2) + "|")
+for harvest_line in harvest_lines:
+    print("| " + harvest_line.ljust(harvest_inner_width) + " |")
+print("+" + "-" * (harvest_box_width - 2) + "+\n")
+
+print(
+    "\nExpected harvest date (estimated): ",
+    harvest_date.strftime("%d %B %Y")
+)
+
+print("\nGROWTH-STAGE TIMELINE")
+
+stages = [
+    ("Establishment", 0.10),
+    ("Vegetative growth", 0.35),
+    ("Flowering/reproductive", 0.65),
+    ("Fruit/grain development", 0.85),
+    ("Maturity and harvest", 1.00)
+]
+
+for i, (name, fraction) in enumerate(stages, 1):
+
+    stage_day = max(
+        1, int(duration * fraction)
+    )
+
+    stage_date = (
+        sowing_date + timedelta(days=stage_day)
+    )
+
+    print(
+        f"{i}. {name:<27} | "
+        f"{stage_date.strftime('%d %b %Y')}"
+    )
+
+# Illustrative shelf-life estimates
+
+PERISHABLE = {
+    "Tomato": (5, 10),
+    "Banana": (5, 12),
+    "Papaya": (4, 8),
+    "Mango": (5, 12),
+    "Spinach": (2, 5),
+    "Coriander": (2, 5),
+    "Grapes": (7, 21),
+    "Strawberry": (2, 7),
+    "Cucumber": (7, 14),
+    "Brinjal": (5, 10),
+    "Cauliflower": (5, 10),
+    "Cabbage": (10, 30),
+    "Potato": (30, 120),
+    "Onion": (30, 180),
+    "Garlic": (60, 180)
+}
+
+shelf_min, shelf_max = PERISHABLE.get(
+    selected_crop, (10, 30)
+)
+
+print(
+    f"\nEstimated shelf life: "
+    f"{shelf_min}–{shelf_max} days (illustrative)"
+)
+
+# ================================================================
+# MODULE 3: MARKETSENSE
+# ================================================================
+
+print("\n" + "=" * 72)
+print("WHERE AND WHEN TO SELL YOUR HARVEST".center(72))
+print("=" * 72)
+
+markets_df["distance_km"] = markets_df.apply(
+    lambda row: haversine_km(
+        lat,
+        lon,
+        row.latitude_approx,
+        row.longitude_approx
+    ),
+    axis=1
+)
+
+nearby_real = (
+    markets_df[markets_df["market_type"] == "Real dataset market"]
+    .sort_values("distance_km")
+    .head(12)
+    .copy()
+)
+selected_district_virtuals = markets_df[
+    (markets_df["market_type"] == "Virtual planning location")
+    & (markets_df["state"].astype(str).str.casefold() == state.casefold())
+    & (markets_df["district"].astype(str).str.casefold() == district.casefold())
+].sort_values("distance_km").copy()
+
+nearby = pd.concat(
+    [nearby_real, selected_district_virtuals],
+    ignore_index=True
+)
+if nearby.empty:
+    nearby = markets_df.sort_values("distance_km").head(12).copy()
+
+market_names = nearby.market.tolist()
+
+# ------------------------- REAL MARKET PRICE ESTIMATES -------------------------
+
+market_commodity_aliases = {
+    "Rice": ["Rice", "Paddy(Common)", "Paddy(Other)"],
+    "Maize": ["Maize"],
+    "Chickpea": ["Chickpea", "Chick Peas", "Bengal Gram(Gram)", "Bengal Gram", "Gram", "Chana", "Kabuli Chana", "Desi Chana"],
+    "Kidney bean": ["Kidney beans", "Beans", "French beans"],
+    "Pigeon pea": ["Pigeon pea", "Arhar (Tur/Red Gram)", "Tur"],
+    "Moth beans": ["Moth beans", "Moth"],
+    "Green gram": ["Green gram", "Green Gram(Moong)", "Moong"],
+    "Black gram": ["Black gram", "Black Gram(Urd Beans)", "Urad"],
+    "Lentil": ["Lentil", "Masur"],
+    "Pomegranate": ["Pomegranate"],
+    "Banana": ["Banana"],
+    "Mango": ["Mango"],
+    "Grapes": ["Grapes"],
+    "Watermelon": ["Watermelon"],
+    "Muskmelon": ["Muskmelon"],
+    "Apple": ["Apple"],
+    "Orange": ["Orange"],
+    "Papaya": ["Papaya"],
+    "Coconut": ["Coconut"],
+    "Cotton": ["Cotton"],
+    "Jute": ["Jute"],
+    "Coffee": ["Coffee"]
+}
+
+available_commodities = market_price_rows["Commodity"].dropna().astype(str).unique().tolist()
+commodity_aliases = market_commodity_aliases.get(selected_crop, [selected_crop])
+selected_commodity_names = [
+    commodity for commodity in available_commodities
+    if any(commodity.casefold() == alias.casefold() for alias in commodity_aliases)
+]
+
+if not selected_commodity_names:
+    fuzzy_match = process.extractOne(
+        selected_crop, available_commodities, scorer=fuzz.WRatio
+    )
+    if fuzzy_match and fuzzy_match[1] >= 88:
+        selected_commodity_names = [fuzzy_match[0]]
+
+crop_market_data = market_price_rows[
+    market_price_rows["Commodity"].isin(selected_commodity_names)
+].copy()
+
+if not crop_market_data.empty:
+    # Keep one comparable commodity/variety/grade series instead of mixing
+    # differently graded produce into a single price trend.
+    reference_commodity = str(crop_market_data["Commodity"].mode().iloc[0])
+    commodity_rows = crop_market_data[
+        crop_market_data["Commodity"].astype(str).str.casefold() == reference_commodity.casefold()
+    ].copy()
+    reference_variety = str(commodity_rows["Variety"].mode().iloc[0])
+    variety_rows = commodity_rows[
+        commodity_rows["Variety"].astype(str).str.casefold() == reference_variety.casefold()
+    ].copy()
+    reference_grade = str(variety_rows["Grade"].mode().iloc[0])
+    crop_market_data = variety_rows[
+        variety_rows["Grade"].astype(str).str.casefold() == reference_grade.casefold()
+    ].copy()
+    crop_market_data = crop_market_data.groupby(
+        ["State", "District", "Market", "Commodity", "Variety", "Grade", "Arrival_Date",
+         "arrival_date_ordinal", "arrival_month_sin", "arrival_month_cos"],
+        as_index=False
+    )["Modal_x0020_Price"].median()
+
+# Restrict market comparisons to markets with real observations for the selected
+# commodity/variety/grade. If none of the initially nearest markets has such data,
+# select the nearest markets that do; do not invent prices for unrelated markets.
+if not crop_market_data.empty:
+    crop_market_keys = crop_market_data[["State", "District", "Market"]].drop_duplicates()
+    nearby_with_crop_history = markets_df.merge(
+        crop_market_keys,
+        left_on=["state", "district", "market"],
+        right_on=["State", "District", "Market"],
+        how="inner"
+    )
+    if not nearby_with_crop_history.empty:
+        nearby_real_with_history = (
+            nearby_with_crop_history.sort_values("distance_km").head(12).copy()
+        )
+        nearby = pd.concat(
+            [nearby_real_with_history, selected_district_virtuals],
+            ignore_index=True
+        )
+        market_names = nearby.market.tolist()
+
+price_estimates_are_synthetic = False
+
+if crop_market_data.empty:
+    # No crop-specific mandi history was found. Generate clearly labelled
+    # synthetic historical prices using local mandi rates as a reference.
+    # These values are artificial estimates, not observed prices for this crop.
+    synthetic_market_rows = []
+    synthetic_dates = pd.date_range(
+        end=pd.Timestamp(date.today()).normalize(),
+        periods=156,
+        freq="W"
+    )
+
+    for market_index, (_, market_row) in enumerate(nearby.iterrows()):
+        market_reference = market_price_rows[
+            market_price_rows["Market"].astype(str).str.casefold()
+            == str(market_row.market).casefold()
+        ]
+        if market_reference.empty:
+            market_reference = market_price_rows[
+                market_price_rows["District"].astype(str).str.casefold()
+                == str(market_row.district).casefold()
+            ]
+        if market_reference.empty:
+            market_reference = market_price_rows[
+                market_price_rows["State"].astype(str).str.casefold()
+                == str(market_row.state).casefold()
+            ]
+        if market_reference.empty:
+            market_reference = market_price_rows
+
+        reference_price = float(
+            market_reference["Modal_x0020_Price"].median()
+        )
+        synthetic_rng = np.random.default_rng(SEED + market_index)
+        trend = np.linspace(-0.06, 0.04, len(synthetic_dates))
+        seasonal_phase = synthetic_rng.uniform(0, 2 * np.pi)
+
+        for date_index, synthetic_date in enumerate(synthetic_dates):
+            seasonal_factor = 1 + 0.08 * np.sin(
+                2 * np.pi * synthetic_date.month / 12 + seasonal_phase
+            )
+            random_factor = synthetic_rng.normal(1.0, 0.04)
+            synthetic_price = max(
+                1.0,
+                reference_price * (1 + trend[date_index])
+                * seasonal_factor * random_factor
+            )
+            synthetic_market_rows.append({
+                "State": market_row.state,
+                "District": market_row.district,
+                "Market": market_row.market,
+                "Commodity": selected_crop,
+                "Variety": "Synthetic estimate",
+                "Grade": "Synthetic estimate",
+                "Arrival_Date": synthetic_date,
+                "arrival_date_ordinal": synthetic_date.toordinal(),
+                "arrival_month_sin": np.sin(2 * np.pi * synthetic_date.month / 12),
+                "arrival_month_cos": np.cos(2 * np.pi * synthetic_date.month / 12),
+                "Modal_x0020_Price": synthetic_price,
+                "data_source": "synthetic"
+            })
+
+    crop_market_data = pd.DataFrame(synthetic_market_rows)
+    price_estimates_are_synthetic = True
+
+elif not selected_district_virtuals.empty:
+    # Virtual markets have no observed quotations. Build labelled synthetic
+    # histories from available real reference rates so they can be compared
+    # without being represented as actual mandi price records.
+    virtual_price_rows = []
+    virtual_dates = pd.date_range(
+        end=pd.Timestamp(date.today()).normalize(),
+        periods=156,
+        freq="W"
+    )
+
+    for virtual_index, (_, virtual_market) in enumerate(
+        selected_district_virtuals.iterrows()
+    ):
+        # Use the selected crop's real price history as the reference whenever
+        # it exists. This avoids basing a virtual mandi's crop estimate on an
+        # unrelated commodity's price.
+        virtual_reference = crop_market_data[
+            (crop_market_data["State"].astype(str).str.casefold() == state.casefold())
+            & (crop_market_data["District"].astype(str).str.casefold() == district.casefold())
+        ]
+        if virtual_reference.empty:
+            virtual_reference = crop_market_data[
+                crop_market_data["State"].astype(str).str.casefold() == state.casefold()
+            ]
+        if virtual_reference.empty:
+            virtual_reference = crop_market_data
+
+        reference_price = float(virtual_reference["Modal_x0020_Price"].median())
+        virtual_rng = np.random.default_rng(
+            SEED + sum(ord(char) for char in str(virtual_market.market)) + 1709
+        )
+        trend = np.linspace(-0.06, 0.04, len(virtual_dates))
+        seasonal_phase = virtual_rng.uniform(0, 2 * np.pi)
+
+        for date_index, virtual_date in enumerate(virtual_dates):
+            seasonal_factor = 1 + 0.08 * np.sin(
+                2 * np.pi * virtual_date.month / 12 + seasonal_phase
+            )
+            synthetic_price = max(
+                1.0,
+                reference_price * (1 + trend[date_index])
+                * seasonal_factor * virtual_rng.normal(1.0, 0.04)
+            )
+            virtual_price_rows.append({
+                "State": virtual_market.state,
+                "District": virtual_market.district,
+                "Market": virtual_market.market,
+                "Commodity": selected_crop,
+                "Variety": "Synthetic estimate",
+                "Grade": "Synthetic estimate",
+                "Arrival_Date": virtual_date,
+                "arrival_date_ordinal": virtual_date.toordinal(),
+                "arrival_month_sin": np.sin(2 * np.pi * virtual_date.month / 12),
+                "arrival_month_cos": np.cos(2 * np.pi * virtual_date.month / 12),
+                "Modal_x0020_Price": synthetic_price,
+                "data_source": "synthetic_virtual_mandi"
+            })
+
+    if virtual_price_rows:
+        crop_market_data = pd.concat(
+            [crop_market_data, pd.DataFrame(virtual_price_rows)],
+            ignore_index=True
+        )
+
+
+def market_date_features(target_date):
+    return np.array([[
+        target_date.toordinal(),
+        np.sin(2 * np.pi * target_date.month / 12),
+        np.cos(2 * np.pi * target_date.month / 12)
+    ]], dtype=float)
+
+
+def predict_market_price_for_date(target_market, target_district, target_state, target_date):
+    """Fit LinearRegression to prior real or synthetic observations for this date.
+
+    Prefer the selected market's own crop history; fall back to district or state
+    history only when a narrower history is too short. Synthetic observations
+    remain labelled as estimates and are never represented as real mandi quotes.
+    """
+    scopes = [
+        ("market", crop_market_data[crop_market_data["Market"].astype(str).str.casefold() == str(target_market).casefold()]),
+        ("district", crop_market_data[crop_market_data["District"].astype(str).str.casefold() == str(target_district).casefold()]),
+        ("state", crop_market_data[crop_market_data["State"].astype(str).str.casefold() == str(target_state).casefold()])
+    ]
+
+    chosen_history = None
+    chosen_scope = None
+    forecast_cutoff = pd.Timestamp(target_date)
+    for scope_name, scope_rows in scopes:
+        candidate_history = scope_rows[
+            scope_rows["Arrival_Date"] < forecast_cutoff
+        ]
+        if not candidate_history.empty:
+            if chosen_history is None:
+                chosen_history = candidate_history
+                chosen_scope = scope_name
+            if candidate_history["Arrival_Date"].nunique() >= 3:
+                x_values = np.column_stack([
+                    candidate_history["arrival_date_ordinal"].to_numpy(dtype=float),
+                    candidate_history["arrival_month_sin"].to_numpy(dtype=float),
+                    candidate_history["arrival_month_cos"].to_numpy(dtype=float)
+                ])
+                y_values = candidate_history["Modal_x0020_Price"].to_numpy(dtype=float)
+                trend_model = LinearRegression()
+                trend_model.fit(x_values, y_values)
+                predicted = float(trend_model.predict(market_date_features(target_date))[0])
+                if scope_name == "market" and "data_source" in candidate_history.columns:
+                    if candidate_history["data_source"].astype(str).str.startswith("synthetic").all():
+                        return max(0.01, predicted), "linear_regression_synthetic_virtual_mandi"
+                return max(0.01, predicted), f"linear_regression_{scope_name}"
+
+    # A one-day snapshot has no trend. Use only the latest observed real quote
+    # from the narrowest available market/district/state scope as a reference.
+    if chosen_history is None:
+        return np.nan, "unavailable"
+    latest_date = chosen_history["Arrival_Date"].max()
+    latest_rows = chosen_history[chosen_history["Arrival_Date"] == latest_date]
+    if latest_rows.empty:
+        return np.nan, "unavailable"
+    return max(0.01, float(latest_rows["Modal_x0020_Price"].median())), f"last_observed_{chosen_scope}_reference"
+
+
+# ------------------------- SELLING TIME COMPARISON -------------------------
+
+selling_options = []
+step = max(1, min(7, shelf_max))
+
+for day_offset in range(0, shelf_max + 1, step):
+    sell_date = harvest_date + timedelta(days=day_offset)
+
+    for _, market_row in nearby.iterrows():
+        price, price_method = predict_market_price_for_date(
+            market_row.market, market_row.district, market_row.state, sell_date
+        )
+        if not np.isfinite(price):
+            continue
+        selling_options.append([
+            market_row.market,
+            sell_date,
+            price,
+            day_offset,
+            price_method
+        ])
+
+options_df = pd.DataFrame(
+    selling_options,
+    columns=[
+        "market", "selling_date", "expected_price",
+        "days_after_harvest", "price_method"
+    ]
+)
+
+if options_df.empty:
+    raise ValueError(
+        "No usable real or synthetic mandi price estimates were available for the selected crop and nearby markets. "
+        "Check that the mandi dataset contains valid market, location and price records."
+    )
+
+# ------------------------- REVENUE & PROFIT -------------------------
+
+cost_per_acre = float(
+    rng.uniform(18000, 65000)
+)
+
+total_cost = cost_per_acre * land_acres
+
+# One tonne = 10 quintals
+
+quantity_quintals = total_yield * 10
+
+options_df["estimated_revenue"] = (
+    options_df.expected_price * quantity_quintals
+)
+
+options_df["estimated_profit"] = (
+    options_df.estimated_revenue - total_cost
+)
+
+best_option = options_df.sort_values(
+    ["estimated_profit", "days_after_harvest"],
+    ascending=[False, True]
+).iloc[0]
+
+harvest_day_option = options_df[
+    options_df.days_after_harvest == 0
+].sort_values(
+    "estimated_profit",
+    ascending=False
+).head(1)
+
+immediate = (
+    harvest_day_option.iloc[0]
+    if len(harvest_day_option) > 0
+    else options_df.iloc[0]
+)
+
+# ------------------------- FINAL RECOMMENDATION -------------------------
+
+print(f"\n\n             Recommended crop: {selected_crop}\n\n")
+print(f"  Suggested sowing date: {sowing_date.strftime('%d %B %Y')}\n")
+print(f"  Expected shelf life: {shelf_min}–{shelf_max} days\n")
+print(f"  Expected harvest date: {harvest_date.strftime('%d %B %Y')}\n")
+print(f"  Recommended selling date: {best_option.selling_date.strftime('%d %B %Y')}\n")
+
+print("\n  MARKET AND FINANCIAL ESTIMATE")
+print(f"  Recommended market:          {best_option.market}")
+print(f"  Expected price:              ₹{best_option.expected_price:,.0f} per quintal")
+print(f"  Expected revenue:            ₹{best_option.estimated_revenue:,.0f}")
+print(f"  Expected cultivation cost:   ₹{total_cost:,.0f}")
+print("-" * 55)
+print(f"| Estimated profit: ₹{best_option.estimated_profit:,.0f}".ljust(54) + "|")
+print("-" * 55)
+print("\n")
+print("=" * 60)
+print(" " * 19 + "THANK YOU FOR USING")
+print(" " * 21 + "AgriLink.AI")
+print("=" * 60)
+print("\n")
