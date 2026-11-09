@@ -248,6 +248,11 @@ By connecting crop recommendation, cultivation guidance, yield estimation, and m
 
 **Connecting Agricultural Data with Better Farming Decisions.**
 
-[View Source Code on GitHub](https://github.com/Mohan-Sai-Karthikeya101/AgriLink.ai)
+<div align="center">
 
+<a href="https://github.com/Mohan-Sai-Karthikeya101/AgriLink.ai/blob/main/Source_code.txt">
+  <strong>📄 VIEW SOURCE CODE</strong>
+</a>
+
+</div>
 </div>
