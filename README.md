@@ -253,7 +253,8 @@ By connecting crop recommendation, cultivation guidance, yield estimation, and m
 <a href="https://github.com/Mohan-Sai-Karthikeya101/AgriLink.ai/blob/main/Source_code.txt">
   <strong>📄 VIEW SOURCE CODE</strong>
 </a>
-
+<br> 
+<br> 
 </div>
 
 
@@ -266,7 +267,7 @@ By connecting crop recommendation, cultivation guidance, yield estimation, and m
 
 <strong>Modukuri Mohan Sai Karthikaya</strong>
 
-<br><br>
+<br>
 
 <strong>Registration Number:</strong> 130003184
 
