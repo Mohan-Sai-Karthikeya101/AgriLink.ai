@@ -255,4 +255,39 @@ By connecting crop recommendation, cultivation guidance, yield estimation, and m
 </a>
 
 </div>
+
+
+</div>
+<div align="center">
+
+<strong>Submitted by:</strong>
+
+<br>
+
+<strong>Modukuri Mohan Sai Karthikaya</strong>
+
+<br><br>
+
+<strong>Registration Number:</strong> 130003184
+
+<br>
+
+<strong>Roll Number:</strong> 10
+
+<br>
+
+<strong>Branch:</strong> B.Tech
+
+<br>
+
+<strong>Year:</strong> First Year
+
+<br>
+
+<strong>Semester:</strong> First Semester
+
+<br>
+
+<strong>Section:</strong> P1
+
 </div>
