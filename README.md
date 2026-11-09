@@ -254,6 +254,13 @@ By connecting crop recommendation, cultivation guidance, yield estimation, and m
   <strong>📄 VIEW SOURCE CODE</strong>
 </a>
 <br> 
+
+<p align="center">
+  <a href="https://docs.google.com/document/d/1tZnROVvKDHQKmFMeKXXgcQQInufgRGmnZW7KSwhFO_Q/edit?usp=sharing">
+    <strong>📄 DOCUMENTATION OF AGRILINK.AI</strong>
+  </a>
+</p>
+<br> 
 <br> 
 <br> 
 </div>
