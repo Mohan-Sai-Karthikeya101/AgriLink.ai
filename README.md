@@ -255,6 +255,7 @@ By connecting crop recommendation, cultivation guidance, yield estimation, and m
 </a>
 <br> 
 <br> 
+<br> 
 </div>
 
 
