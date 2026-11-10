@@ -101,6 +101,9 @@ from rapidfuzz import process, fuzz
 
 SEED = 42
 
+# Initial screening threshold; validate against local agronomic outcomes before deployment.
+MINIMUM_CROP_SUITABILITY_THRESHOLD = 40.0  # Initial screen, not a calibrated agronomic guarantee
+
 rng = np.random.default_rng(SEED)
 random.seed(SEED)
 
@@ -133,6 +136,138 @@ CROPS = [
     "Drumstick", "Strawberry", "Dragon fruit", "Avocado",
     "Moth beans", "Orange"
 ]
+
+
+# ------------------------- FIXED HISTORICAL / REFERENCE YIELD BENCHMARKS -------------------------
+# All values are fixed kg of harvested product per hectare. No random, synthetic,
+# regression-generated or calendar-generated yield is used for the farmer's estimate.
+# Official national statistics are used where the Government of India publishes a
+# comparable commodity yield series. For minor horticulture/plantation crops without
+# a directly comparable national series, the value is an indicative planning reference,
+# NOT an official historical statistic. Such crops require local district validation.
+# Official source: DA&FW, Agricultural Statistics at a Glance 2024-25, Tables 2.1 and
+# 2.27 and crop-specific tables (latest available series vary by commodity).
+
+CROP_YIELD_BENCHMARK_KG_HA = {
+    'Rice': 2835,
+    'Wheat': 3547,
+    'Maize': 3422,
+    'Sorghum': 1135,
+    'Pearl millet': 1468,
+    'Finger millet': 1700,
+    'Barley': 3080,
+    'Oats': 2500,
+    'Chickpea': 1199,
+    'Pigeon pea': 852,
+    'Green gram': 700,
+    'Black gram': 650,
+    'Lentil': 900,
+    'Field pea': 1000,
+    'Kidney bean': 1000,
+    'Soybean': 1071,
+    'Groundnut': 1945,
+    'Mustard': 1468,
+    'Sesame': 500,
+    'Sunflower': 1042,
+    'Safflower': 768,
+    'Linseed': 644,
+    'Castor': 1600,
+    'Cotton': 440,
+    'Jute': 2665,
+    'Sugarcane': 82741,
+    'Potato': 24000,
+    'Sweet potato': 12000,
+    'Cassava': 25000,
+    'Onion': 18000,
+    'Garlic': 7000,
+    'Tomato': 25000,
+    'Brinjal': 25000,
+    'Chilli': 18000,
+    'Capsicum': 20000,
+    'Cabbage': 25000,
+    'Cauliflower': 22000,
+    'Broccoli': 12000,
+    'Okra': 10000,
+    'Cucumber': 18000,
+    'Pumpkin': 18000,
+    'Bottle gourd': 20000,
+    'Bitter gourd': 12000,
+    'Ridge gourd': 12000,
+    'Watermelon': 25000,
+    'Muskmelon': 18000,
+    'Carrot': 25000,
+    'Radish': 25000,
+    'Beetroot': 20000,
+    'Turnip': 18000,
+    'Spinach': 12000,
+    'Amaranth': 12000,
+    'Fenugreek': 8000,
+    'Coriander': 8000,
+    'Mint': 10000,
+    'Banana': 35000,
+    'Mango': 8000,
+    'Papaya': 40000,
+    'Guava': 15000,
+    'Citrus': 12000,
+    'Lemon': 10000,
+    'Pomegranate': 10000,
+    'Grapes': 25000,
+    'Apple': 10000,
+    'Pear': 12000,
+    'Peach': 10000,
+    'Plum': 8000,
+    'Litchi': 7000,
+    'Pineapple': 20000,
+    'Jackfruit': 8000,
+    'Coconut': 10000,
+    'Arecanut': 2500,
+    'Cashew': 800,
+    'Coffee': 780,
+    'Tea': 2042,
+    'Turmeric': 20000,
+    'Ginger': 15000,
+    'Black pepper': 800,
+    'Cardamom': 500,
+    'Clove': 300,
+    'Cocoa': 500,
+    'Rubber': 1500,
+    'Aloe vera': 25000,
+    'Marigold': 12000,
+    'Rose': 10000,
+    'Jasmine': 8000,
+    'Tobacco': 1800,
+    'Fodder maize': 35000,
+    'Lucerne': 80000,
+    'Berseem': 65000,
+    'Napier grass': 150000,
+    'Quinoa': 1200,
+    'Amaranth grain': 1200,
+    'Moringa': 15000,
+    'Drumstick': 12000,
+    'Strawberry': 20000,
+    'Dragon fruit': 15000,
+    'Avocado': 8000,
+    'Moth beans': 500,
+    'Orange': 12000,
+ }
+
+# Provenance is explicit so an indicative planning reference is never misrepresented
+# as an official published historical yield.
+OFFICIAL_YIELD_BENCHMARK_CROPS = {
+    "Rice", "Wheat", "Maize", "Sorghum", "Pearl millet", "Barley",
+    "Chickpea", "Pigeon pea", "Soybean", "Groundnut", "Mustard",
+    "Sunflower", "Safflower", "Linseed", "Sugarcane", "Cotton",
+    "Jute", "Tea", "Coffee", "Potato", "Onion", "Coconut"
+}
+
+# Where a recent state-specific official observation is available, prefer it.
+# Andhra Pradesh safflower: 478 kg/ha in 2022-23 (DA&FW, Table 2.44).
+STATE_CROP_YIELD_BENCHMARKS_KG_HA = {
+    ("Andhra Pradesh", "Safflower"): 478
+}
+
+if set(CROP_YIELD_BENCHMARK_KG_HA) != set(CROPS):
+    raise ValueError("Yield benchmark table must contain exactly all 100 project crops.")
 
 
 # ------------------------- CROP FAMILY FALLBACK -------------------------
@@ -423,6 +558,7 @@ CROP_PROFILES = {
     "Mustard": {"soils": ["Loamy", "Alluvial", "Sandy"], "ph": 7.0, "temp": 20, "rain": 400, "water": "Low", "n": 65, "p": 35, "k": 30},
     "Cotton": {"soils": ["Black cotton soil", "Loamy", "Alluvial"], "ph": 7.0, "temp": 28, "rain": 700, "water": "Moderate", "n": 80, "p": 40, "k": 45},
     "Sugarcane": {"soils": ["Alluvial", "Loamy", "Black cotton soil"], "ph": 6.5, "temp": 28, "rain": 1400, "water": "High", "n": 120, "p": 50, "k": 80},
+    "Tea": {"soils": ["Loamy", "Red soil", "Laterite"], "ph": 5.0, "temp": 23, "rain": 1500, "water": "Moderate", "n": 120, "p": 35, "k": 90},
     "Potato": {"soils": ["Loamy", "Sandy", "Alluvial"], "ph": 5.8, "temp": 18, "rain": 600, "water": "Moderate", "n": 100, "p": 50, "k": 100},
     "Onion": {"soils": ["Loamy", "Alluvial", "Sandy"], "ph": 6.5, "temp": 22, "rain": 500, "water": "Moderate", "n": 80, "p": 40, "k": 60},
     "Tomato": {"soils": ["Loamy", "Alluvial", "Red soil"], "ph": 6.2, "temp": 24, "rain": 650, "water": "Moderate", "n": 90, "p": 45, "k": 70}
@@ -468,16 +604,153 @@ def get_crop_profile(crop):
     }
     return profile, False
 
+# ------------------------- CROP-SPECIFIC MATURITY DURATIONS -------------------------
+# Representative planning durations in days, from sowing/transplanting to maturity
+# and harvest for annual crops. For perennial crops, the value is the indicative
+# period from planting to the first commercial harvest/bearing. Values are fixed,
+# crop-specific reference points selected from published crop guidance; actual
+# duration varies with cultivar, season, agro-climate and management. Where a
+# locally recommended variety/package specifies a different duration, use that.
+#
+# Reference basis:
+# FAO crop-water guidance, indicative total growing periods:
+# https://www.fao.org/4/S2022E/s2022e07.htm
+# TNAU crop calendars, first-harvest guidance and crop production pages:
+# https://agritech.tnau.ac.in/horticulture/horti_Landscaping_types%20of%20garden.html
+# https://agritech.tnau.ac.in/agriculture/agri_cropharvesting.html
+# https://agritech.tnau.ac.in/CropProduction/Millets/millets_ragi.html
+# https://agritech.tnau.ac.in/horticulture/horti_vegetables_tomato_varieties.html
+# ICAR-IIPR crop variety durations for chickpea, pigeonpea, black gram and field pea:
+# https://www.icar-iipr.org.in/varieties/
+# https://www.icar-iipr.org.in/cimprovment/
+# https://www.icar-iipr.org.in/technologies/
+# ICAR soybean variety maturity:
+# https://icar-nsri.res.in/aicrps_var.html
+# TNAU cotton and brinjal variety/crop-duration guidance:
+# https://agritech.tnau.ac.in/agriculture/agri_seasonandvarieties_cotton.html
+# https://agritech.tnau.ac.in/horticulture/horti_vegetables_brinjal_varieties_COBH.html
+# TNAU and other horticulture extension references for perennial first bearing:
+# https://agritech.tnau.ac.in/horticulture/horti_orchard%20management.html
+# https://www.agritech.tnau.ac.in/govt_schemes_services/aas/mango.html
+# https://www.agritech.tnau.ac.in/horticulture/horti_fruits_guava.html
+# https://www.agritech.tnau.ac.in/horticulture/horti_plantation%20crops_arecanut.html
+# https://agritech.tnau.ac.in/horticulture/horti_spice%20crops_cardamom.html
+# https://www.agritech.tnau.ac.in/horticulture/coconut_varieties/coconut_tall_VPM-4.html
+# ICAR-IISR / TNAU turmeric and ginger:
+# https://spices.res.in/pages/prathibha-turmeric
+# https://egovernance.vikaspedia.in/viewcontent/agriculture/crop-production/package-of-practices/spices/ginger?lgn=en
+# KAU turmeric harvest guidance:
+# https://www.celkau.in/crops/spices/Turmeric/
+#
+# For crops without a directly comparable published Indian variety-duration table,
+# the entries are indicative agronomic planning estimates, not official guarantees.
+# Perennial crop durations must not be interpreted as the length of each later harvest.
+
 CROP_DURATION = {
-    crop: int(rng.integers(75, 180))
-    for crop in CROPS
+    "Rice": 120,
+    "Wheat": 135,
+    "Maize": 135,
+    "Sorghum": 125,
+    "Pearl millet": 120,
+    "Finger millet": 100,
+    "Barley": 135,
+    "Oats": 135,
+    "Chickpea": 115,
+    "Pigeon pea": 165,
+    "Green gram": 70,
+    "Black gram": 75,
+    "Lentil": 140,
+    "Field pea": 110,
+    "Kidney bean": 130,
+    "Soybean": 100,
+    "Groundnut": 130,
+    "Mustard": 120,
+    "Sesame": 100,
+    "Sunflower": 125,
+    "Safflower": 150,
+    "Linseed": 150,
+    "Castor": 180,
+    "Cotton": 155,
+    "Jute": 120,
+    "Sugarcane": 330,
+    "Potato": 120,
+    "Sweet potato": 135,
+    "Cassava": 240,
+    "Onion": 165,
+    "Garlic": 160,
+    "Tomato": 140,
+    "Brinjal": 130,
+    "Chilli": 150,
+    "Capsicum": 140,
+    "Cabbage": 120,
+    "Cauliflower": 120,
+    "Broccoli": 100,
+    "Okra": 60,
+    "Cucumber": 60,
+    "Pumpkin": 110,
+    "Bottle gourd": 70,
+    "Bitter gourd": 70,
+    "Ridge gourd": 65,
+    "Watermelon": 90,
+    "Muskmelon": 85,
+    "Carrot": 110,
+    "Radish": 40,
+    "Beetroot": 95,
+    "Turnip": 50,
+    "Spinach": 55,
+    "Amaranth": 30,
+    "Fenugreek": 50,
+    "Coriander": 50,
+    "Mint": 50,
+    "Banana": 330,
+    "Mango": 1275,
+    "Papaya": 270,
+    "Guava": 900,
+    "Citrus": 1095,
+    "Lemon": 1095,
+    "Pomegranate": 730,
+    "Grapes": 730,
+    "Apple": 1460,
+    "Pear": 1460,
+    "Peach": 1095,
+    "Plum": 1095,
+    "Litchi": 1460,
+    "Pineapple": 540,
+    "Jackfruit": 1460,
+    "Coconut": 2000,
+    "Arecanut": 1825,
+    "Cashew": 1095,
+    "Coffee": 1095,
+    "Tea": 1095,
+    "Turmeric": 240,
+    "Ginger": 225,
+    "Black pepper": 1095,
+    "Cardamom": 730,
+    "Clove": 2190,
+    "Cocoa": 1095,
+    "Rubber": 2190,
+    "Aloe vera": 365,
+    "Marigold": 90,
+    "Rose": 180,
+    "Jasmine": 180,
+    "Tobacco": 140,
+    "Fodder maize": 75,
+    "Lucerne": 70,
+    "Berseem": 60,
+    "Napier grass": 85,
+    "Quinoa": 120,
+    "Amaranth grain": 110,
+    "Moringa": 240,
+    "Drumstick": 240,
+    "Strawberry": 120,
+    "Dragon fruit": 730,
+    "Avocado": 1460,
+    "Moth beans": 75,
+    "Orange": 1095
 }
 
-for crop in [
-    "Sugarcane", "Coconut", "Arecanut", "Tea", "Coffee",
-    "Rubber", "Apple", "Mango", "Cashew", "Jackfruit"
-]:
-    CROP_DURATION[crop] = int(rng.integers(240, 420))
+if set(CROP_DURATION) != set(CROPS) or len(CROP_DURATION) != 100:
+    raise ValueError("Crop maturity duration table must contain exactly all 100 project crops.")
 
 
 # ------------------------- LOAD PRECOMPUTED GITHUB BUNDLE -------------------------
@@ -545,102 +818,42 @@ for filename, df in datasets.items():
 
 
 def estimate_real_yield_tonnes_per_acre(crop, selected_state, selected_district):
-
-    # Prefer the optional wide-format real dataset when it contains a district-level
-    # yield explicitly measured in tonnes/hectare. Nuts and bales are never converted
-    # to tonnes without a crop-specific physical conversion factor.
-    if not wide_yield_df.empty:
-        wide_crop_rows = wide_yield_df[
-            (wide_yield_df["crop_name"].astype(str).str.casefold() == crop.casefold())
-            & wide_yield_df["yield_tonnes_per_hectare"].notna()
-            & (wide_yield_df["yield_tonnes_per_hectare"] > 0)
-        ].copy()
-        normalize_location = lambda value: re.sub(r"^\s*\d+\.\s*", "", str(value)).strip().casefold()
-        exact_district_rows = wide_crop_rows[
-            wide_crop_rows["district_name"].map(normalize_location) == normalize_location(selected_district)
-        ]
-        if not exact_district_rows.empty:
-            latest_year = exact_district_rows["year_start"].max()
-            recent_rows = exact_district_rows[
-                exact_district_rows["year_start"] >= latest_year - 2
-            ]
-            return max(0.0, float(recent_rows["yield_tonnes_per_hectare"].median()) / 2.47105)
-
-    upag_crop = UPAG_CROP_MAP.get(crop)
-    if not upag_crop:
-        return None
-
-    matching_crop = upag_df[
-        upag_df["crop_name"].astype(str).str.casefold() == upag_crop.casefold()
-    ].copy()
-
-    if matching_crop.empty:
-        return None
-
-    state_rows = matching_crop[
-        matching_crop["state_name"].astype(str).str.casefold()
-        == selected_state.casefold()
-    ]
-    if not state_rows.empty:
-        matching_crop = state_rows
-
-    district_rows = matching_crop[
-        matching_crop["district_name"].astype(str).str.casefold()
-        == selected_district.casefold()
-    ]
-    if not district_rows.empty:
-        matching_crop = district_rows
-
-    chosen_state = str(matching_crop["state_name"].mode().iloc[0])
-    chosen_district = str(matching_crop["district_name"].mode().iloc[0])
-    reference_area = float(matching_crop["area"].median())
-    prediction_year = int(upag_df["year_start"].max())
-    available_seasons = sorted(upag_df["season"].dropna().astype(str).unique())
-
-    prediction_rows = pd.DataFrame([
-        {
-            "state_name": chosen_state,
-            "district_name": chosen_district,
-            "crop_name": upag_crop,
-            "season": season,
-            "year_start": prediction_year,
-            "area": reference_area
-        }
-        for season in available_seasons
-    ])
-
-    predicted_kg_per_hectare = float(
-        np.mean(yield_model.predict(prediction_rows))
+    """Return the fixed crop benchmark converted from kg/ha to tonnes/acre."""
+    benchmark_kg_per_hectare = STATE_CROP_YIELD_BENCHMARKS_KG_HA.get(
+        (selected_state, crop), CROP_YIELD_BENCHMARK_KG_HA.get(crop)
     )
-
-    # The supplied normalized UPAG long-format file stores yield in kg/hectare.
-    # This conversion is valid for its tonne-based crop records; non-tonne crops
-    # (e.g. nuts/bales in separate wide-format tables) must not be merged without
-    # a unit conversion table.
-    return max(0.0, predicted_kg_per_hectare / 1000.0 / 2.47105)
+    if benchmark_kg_per_hectare is None:
+        raise ValueError(f"No fixed yield benchmark is defined for {crop}.")
+    return float(benchmark_kg_per_hectare) * 0.404686 / 1000.0
 
 # ------------------------- INPUT HELPERS -------------------------
 
-def best_match(value, choices):
+def best_match(value, choices, field_name="value", threshold=70):
 
     # Normalize both the user's entry and database choices so matching is
     # case-insensitive and tolerant of extra spaces and spelling mistakes.
-    normalized_value = " ".join(str(value).casefold().split())
     normalized_choices = [
         " ".join(str(choice).casefold().split())
         for choice in choices
     ]
 
-    match = process.extractOne(
-        normalized_value,
-        normalized_choices,
-        scorer=fuzz.WRatio
-    )
+    raw_value = value
 
-    if match:
-        return choices[match[2]]
+    while True:
+        normalized_value = " ".join(str(raw_value).casefold().split())
 
-    return choices[0]
+        match = process.extractOne(
+            normalized_value,
+            normalized_choices,
+            scorer=fuzz.WRatio
+        )
+
+        if match and match[1] >= threshold:
+            return choices[match[2]]
+
+        raw_value = input(
+            f"Invalid {field_name}. Please re-enter: "
+        ).strip()
 
 
 def ask_float(prompt, low, high, suffix=""):
@@ -660,9 +873,12 @@ def ask_float(prompt, low, high, suffix=""):
         except ValueError:
             pass
 
-        print(
-            f"Please enter a number between {low} and {high}."
-        )
+        if prompt == "Average temperature":
+            print("Enter a number between 0 and 50.")
+        else:
+            print(
+                f"Please enter a number between {low} and {high}."
+            )
 
 
 def ask_choice(prompt, choices):
@@ -673,7 +889,8 @@ def ask_choice(prompt, choices):
 
     raw = input("Your choice: ").strip()
 
-    return best_match(raw, choices)
+    field_name = prompt.replace("Select ", "").rstrip(":").lower()
+    return best_match(raw, choices, field_name)
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
@@ -713,12 +930,14 @@ print("\nEnter your farm details.")
 
 state = best_match(
     input("\nState: "),
-    list(STATE_DISTRICTS.keys())
+    list(STATE_DISTRICTS.keys()),
+    "state"
 )
 
 district = best_match(
     input("District: "),
-    STATE_DISTRICTS[state]
+    STATE_DISTRICTS[state],
+    "district"
 )
 
 soil = ask_choice("Select soil type:", SOILS)
@@ -788,34 +1007,22 @@ for nutrient, value, label, remedy_low, remedy_high in [
             remedy_high
         ))
 
-if soil_warnings:
-    box_width = max(76, max(len(warning) for warning, _ in soil_warnings) + 6,
-                    max(len(remedy) for _, remedy in soil_warnings) + 6)
-    border = "-" * (box_width - 2)
-    heading = "SOIL HEALTH ALERT"
-    subtitle = "Check these values before planting"
-
-    print("\n|" + border + "|")
-    print("|" + heading.center(box_width - 2) + "|")
-    print("|" + subtitle.center(box_width - 2) + "|")
-    print("|" + border + "|")
-
-    for index, (warning, remedy) in enumerate(soil_warnings):
-        print("| " + warning.ljust(box_width - 4) + " |")
-        print("| " + remedy.ljust(box_width - 4) + " |")
-        if index < len(soil_warnings) - 1:
-            print("|".ljust(box_width - 1) + "|")
-
-    print("|" + border + "|\n")
-
-print("\n" + "=" * 72)
-print("CROP RECOMMENDATIONS FOR YOUR FARM".center(72))
-print("=" * 72)
-
 district_rain = rain_df[
     (rain_df.state == state)
     & (rain_df.district == district)
 ]
+
+
+# Use the supplied historical district rainfall records for the existing
+# rainfall-compatibility calculation. No live-weather service is queried.
+weather_historical_monthly = (
+    district_rain.groupby("month")["rainfall_mm"].mean().to_dict()
+    if not district_rain.empty else {}
+)
+district_annual_rainfall = (
+    float(sum(weather_historical_monthly.values()))
+    if weather_historical_monthly else None
+)
 
 dataset_crop_profiles = (
     crop_df.groupby("crop")[crop_feature_columns]
@@ -831,6 +1038,8 @@ ph_model_value = float(np.clip(
 ))
 
 ranked = []
+
+crop_factor_diagnostics = {}
 
 for crop in crop_encoder.classes_:
     profile, has_crop_profile = get_crop_profile(crop)
@@ -861,6 +1070,8 @@ for crop in crop_encoder.classes_:
         "rain": float(data_profile["rainfall_mm"]),
         "humidity": float(data_profile["humidity"])
     }
+    if crop in CROP_PROFILES:
+        profile.update(CROP_PROFILES[crop])
 
     soil_score = 100 if soil in profile["soils"] else 48
     ph_distance = max(0.0, abs(ph - profile["ph"]) - 0.35)
@@ -869,7 +1080,12 @@ for crop in crop_encoder.classes_:
     temp_distance = abs(temperature - profile["temp"])
     temperature_score = max(0.0, 100 - temp_distance * 4.0)
 
-    water_score = 100 if water == profile["water"] else 58
+    water_score = 100 if water == profile["water"] else 0
+    rainfall_score = (
+        100.0
+        if district_annual_rainfall is None
+        else min(100.0, 100.0 * district_annual_rainfall / max(float(profile["rain"]), 1.0))
+    )
 
     def nutrient_match(actual, target):
         return max(0.0, 100 - abs(actual - target) / max(target, 1) * 65)
@@ -880,17 +1096,62 @@ for crop in crop_encoder.classes_:
         nutrient_match(potassium, profile["k"])
     ]))
 
+
+    crop_factor_diagnostics[crop] = {
+        "Nitrogen": {
+            "score": nutrient_match(nitrogen, profile["n"]),
+            "actual": nitrogen, "target": float(profile["n"]), "unit": "kg/ha"
+        },
+        "Phosphorus": {
+            "score": nutrient_match(phosphorus, profile["p"]),
+            "actual": phosphorus, "target": float(profile["p"]), "unit": "kg/ha"
+        },
+        "Potassium": {
+            "score": nutrient_match(potassium, profile["k"]),
+            "actual": potassium, "target": float(profile["k"]), "unit": "kg/ha"
+        },
+        "Temperature": {
+            "score": temperature_score,
+            "actual": temperature, "target": float(profile["temp"]), "unit": "°C"
+        },
+        "Soil pH": {
+            "score": ph_score,
+            "actual": ph, "target": float(profile["ph"]), "unit": "pH"
+        },
+        "Soil type": {
+            "score": soil_score,
+            "actual": soil, "target": ", ".join(profile["soils"]), "unit": ""
+        },
+        "Water availability": {
+            "score": water_score,
+            "actual": water, "target": profile["water"], "unit": ""
+        },
+        "Rainfall": {
+            "score": rainfall_score,
+            "actual": district_annual_rainfall,
+            "target": float(profile["rain"]), "unit": "mm/year"
+        }
+    }
+
     compatibility_score = (
-        0.20 * soil_score
-        + 0.20 * ph_score
-        + 0.20 * temperature_score
+        0.15 * soil_score
+        + 0.15 * ph_score
+        + 0.15 * temperature_score
         + 0.10 * water_score
-        + 0.30 * nutrient_score
+        + 0.25 * nutrient_score
+        + 0.20 * rainfall_score
     )
 
     # The ML model still receives all seven trained features; humidity and
     # rainfall are supplied from this crop's real training-data averages.
     final_score = 0.55 * ml_score + 0.45 * compatibility_score
+    severe_constraint_count = sum(
+        score < 25.0 for score in
+        (soil_score, ph_score, temperature_score, water_score, nutrient_score)
+    )
+    if rainfall_score < 40.0:
+        severe_constraint_count += 1
+    final_score *= 0.75 ** severe_constraint_count
 
     ranked.append((crop, min(100.0, final_score)))
 ranked.sort(
@@ -898,773 +1159,1637 @@ ranked.sort(
     reverse=True
 )
 
-print("\n" + f"{'TOP 10 SUITABLE CROPS':<30}{'Suitability score (%)':^24}")
-
-for i, (crop, score) in enumerate(ranked[:10], 1):
-
-    print(
-        f"{i:2}. {crop:<26}{f'{score:.1f}%':^24}"
-    )
-
-top_crops = ranked[:10]
-
-top_crop_names = [crop for crop, _ in top_crops]
-
-while True:
-    crop_choice = input(
-        "\nEnter one of the recommended crops you want to explore: "
-    ).strip()
-
-    if not crop_choice:
-        print("Please enter at least one letter of a recommended crop name.")
-        continue
-
-    # Match case-insensitively and tolerate partial names and spelling errors.
-    # The match is always selected from the ten crops displayed above.
-    normalized_choice = " ".join(crop_choice.casefold().split())
-    normalized_top_names = [name.casefold() for name in top_crop_names]
-    crop_match = max(
-        (process.extractOne(normalized_choice, normalized_top_names, scorer=scorer)
-         for scorer in (fuzz.WRatio, fuzz.partial_ratio, fuzz.ratio)),
-        key=lambda match: match[1] if match else -1
-    )
-
-    if crop_match:
-        selected_crop = top_crop_names[crop_match[2]]
-        if crop_choice.casefold() != selected_crop.casefold():
-            print(f"Closest recommended crop matched: {selected_crop}")
-        break
-
-crop_rows = calendar_df[
-    (calendar_df.state == state)
-    & (calendar_df.district == district)
-    & (calendar_df.crop == selected_crop)
+eligible_crops = [
+    (crop, score) for crop, score in ranked
+    if score >= MINIMUM_CROP_SUITABILITY_THRESHOLD
 ]
 
-if crop_rows.empty:
-    raise ValueError(
-        "No crop calendar data found for this selection."
-    )
+if eligible_crops:
+    if soil_warnings:
+        box_width = max(76, max(len(warning) for warning, _ in soil_warnings) + 6,
+                        max(len(remedy) for _, remedy in soil_warnings) + 6)
+        border = "-" * (box_width - 2)
+        heading = "SOIL HEALTH ALERT"
+        subtitle = "Check these values before planting"
 
-# Use the selected crop's average rainfall from the real training dataset as
-# its rainfall requirement when comparing the available sowing months.
-crop_average_rainfall = float(
-    dataset_crop_profiles[selected_crop]["rainfall_mm"]
-)
-monthly_district_rainfall = (
-    district_rain.groupby("month")["rainfall_mm"].mean().to_dict()
-)
+        print("\n|" + border + "|")
+        print("|" + heading.center(box_width - 2) + "|")
+        print("|" + subtitle.center(box_width - 2) + "|")
+        print("|" + border + "|")
 
-def expected_seasonal_rainfall(sowing_month, crop_duration_days):
-    month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    remaining_days = int(crop_duration_days)
-    month = int(sowing_month)
-    total_rainfall = 0.0
+        for index, (warning, remedy) in enumerate(soil_warnings):
+            print("| " + warning.ljust(box_width - 4) + " |")
+            print("| " + remedy.ljust(box_width - 4) + " |")
+            if index < len(soil_warnings) - 1:
+                print("|".ljust(box_width - 1) + "|")
 
-    while remaining_days > 0:
-        days_in_month = month_days[month - 1]
-        days_in_period = min(remaining_days, days_in_month)
-        monthly_average = float(
-            monthly_district_rainfall.get(
-                month, district_rain["rainfall_mm"].mean()
-            )
+        print("|" + border + "|\n")
+
+    print("\n" + "=" * 72)
+    print("CROP RECOMMENDATIONS FOR YOUR FARM".center(72))
+    print("=" * 72)
+    print("\n" + "TOP 10 SUITABLE CROPS".center(72))
+    print("-" * 72)
+    print(f"{'RANK':<8}{'CROP':<36}{'SUITABILITY SCORE':>22}")
+    print("-" * 72)
+
+    for i, (crop, score) in enumerate(ranked[:10], 1):
+
+        print(f"{i:<8}{crop:<36}{f'{score:.1f}%':>22}")
+
+    top_crops = ranked[:10]
+
+    top_crop_names = [crop for crop, _ in top_crops]
+
+    while True:
+        crop_choice = input(
+            "\nEnter one of the recommended crops you want to explore: "
+        ).strip()
+
+        if not crop_choice:
+            print("Please enter at least one letter of a recommended crop name.")
+            continue
+
+        # Match case-insensitively and tolerate partial names and spelling errors.
+        # The match is always selected from the ten crops displayed above.
+        normalized_choice = " ".join(crop_choice.casefold().split())
+        normalized_top_names = [name.casefold() for name in top_crop_names]
+        crop_match = max(
+            (process.extractOne(normalized_choice, normalized_top_names, scorer=scorer)
+             for scorer in (fuzz.WRatio, fuzz.partial_ratio, fuzz.ratio)),
+            key=lambda match: match[1] if match else -1
         )
-        total_rainfall += monthly_average * days_in_period / days_in_month
-        remaining_days -= days_in_period
-        month = month % 12 + 1
 
-    return total_rainfall
-
-crop_rows = crop_rows.copy()
-crop_rows["expected_seasonal_rainfall_mm"] = crop_rows.apply(
-    lambda row: expected_seasonal_rainfall(
-        int(row.sowing_month), int(row.duration_days)
-    ),
-    axis=1
-)
-
-crop_rows["rainfall_suitability"] = crop_rows[
-    "expected_seasonal_rainfall_mm"
-].apply(
-    lambda value: max(
-        0.0,
-        1.0 - abs(float(value) - crop_average_rainfall)
-        / max(crop_average_rainfall, 1.0)
-    )
-)
-
-real_yield_per_acre = estimate_real_yield_tonnes_per_acre(
-    selected_crop, state, district
-)
-
-if real_yield_per_acre is not None:
-    calendar_average = float(
-        crop_rows["synthetic_yield_tonnes_per_acre"].mean()
-    )
-    crop_rows = crop_rows.copy()
-    crop_rows["estimated_yield_tonnes_per_acre"] = (
-        real_yield_per_acre
-        * crop_rows["synthetic_yield_tonnes_per_acre"]
-        / max(calendar_average, 1e-9)
-    )
-else:
-    crop_rows = crop_rows.copy()
-    crop_rows["estimated_yield_tonnes_per_acre"] = (
-        crop_rows["synthetic_yield_tonnes_per_acre"]
-    )
-
-# Give rainfall alignment a limited influence on the estimated sowing-month yield.
-crop_rows["estimated_yield_tonnes_per_acre"] *= (
-    0.70 + 0.30 * crop_rows["rainfall_suitability"]
-)
-
-best_months = crop_rows.sort_values(
-    "estimated_yield_tonnes_per_acre",
-    ascending=False
-).head(4)
-
-best_sowing_month = int(
-    best_months.iloc[0].sowing_month
-)
-
-duration = int(
-    best_months.iloc[0].duration_days
-)
-
-estimated_yield_per_acre = float(
-    best_months.iloc[0].estimated_yield_tonnes_per_acre
-)
-
-total_yield = estimated_yield_per_acre * land_acres
-
-today = date.today()
-
-sowing_year = (
-    today.year
-    if best_sowing_month >= today.month
-    else today.year + 1
-)
-
-sowing_date = date(
-    sowing_year, best_sowing_month, 15
-)
-
-harvest_date = (
-    sowing_date + timedelta(days=duration)
-)
-
-print(f"\nSELECTED CROP: {selected_crop}")
-
-print(
-    f"Estimated yield per acre: "
-    f"{estimated_yield_per_acre:.2f} tonnes"
-)
-
-print(
-    f"Estimated yield for {land_acres:.2f} acres: "
-    f"{total_yield:.2f} tonnes"
-)
-
-# ================================================================
-# MODULE 2: CROPCARE
-# ================================================================
-
-print("\n" + "=" * 72)
-print("HOW TO GROW AND CARE FOR YOUR CROP".center(72))
-print("=" * 72)
-
-guide = guidelines_df[
-    guidelines_df.crop == selected_crop
-].iloc[0]
-
-print(
-    f"\nCULTIVATION GUIDELINES — {selected_crop}\n"
-)
-
-sections = [
-    ("1. Land preparation", "land_preparation"),
-    ("2. Fertilizer application", "fertilizer_application"),
-    ("3. Nutrient guidance", "nutrient_guidance"),
-    ("4. Crop monitoring", "monitoring"),
-    ("5. Common diseases — symptoms and prevention", "common_diseases"),
-    ("6. Common pests — damage and prevention", "common_pests"),
-    ("7. Integrated pest management", "ipm_guidance")
-]
+        if crop_match:
+            selected_crop = top_crop_names[crop_match[2]]
+            if crop_choice.casefold() != selected_crop.casefold():
+                print(f"Closest recommended crop matched: {selected_crop}")
+            break
 
 
-def concise_guideline(value, section):
-    """Keep guidance useful and brief, while wrapping long lines cleanly."""
-    value = str(value).strip()
 
-    if section in {"common_diseases", "common_pests"}:
-        formatted = []
-        for item in value.splitlines():
-            item = item.strip().lstrip("• ")
-            if not item:
-                continue
-            if "Prevention/management:" in item:
-                name, details = item.split(":", 1)
-                symptoms, management = details.split("Prevention/management:", 1)
-                symptom_sentence = re.split(r"(?<=[.!?])\s+", symptoms.strip())[0]
-                management_sentence = re.split(r"(?<=[.!?])\s+", management.strip())[0]
-                short_item = (
-                    f"{name}: {symptom_sentence} "
-                    f"Prevention: {management_sentence}"
+    # ------------------------- SELECTED-CROP EXTREME INPUT DIAGNOSTICS -------------------------
+    selected_factor_data = crop_factor_diagnostics.get(selected_crop, {})
+    severe_factors = [
+        (name, details)
+        for name, details in selected_factor_data.items()
+        if name in {"Nitrogen", "Phosphorus", "Potassium", "Temperature", "Soil pH"} and float(details["score"]) <= 45.0
+    ]
+    severe_factors.sort(key=lambda item: float(item[1]["score"]))
+
+    if len(severe_factors) >= 2:
+        diagnostic_recommendations = []
+        for factor_name, details in severe_factors[:2]:
+            actual_value = float(details["actual"])
+            target_value = float(details["target"])
+            unit = details["unit"]
+
+            if factor_name in {"Nitrogen", "Phosphorus", "Potassium"}:
+                if actual_value < target_value:
+                    action = {
+                        "Nitrogen": "Use a soil-test-based nitrogen plan; split-apply the recommended nitrogen dose.",
+                        "Phosphorus": "Use a soil-test-based phosphorus application; incorporate the recommended dose before planting.",
+                        "Potassium": "Use a soil-test-based potash application and incorporate it as locally recommended."
+                    }[factor_name]
+                    condition = "below"
+                else:
+                    action = f"Avoid adding more {factor_name.lower()} until a soil test confirms the level has reduced."
+                    condition = "above"
+                explanation = (
+                    f"{factor_name}: entered {actual_value:.1f} {unit}, "
+                    f"crop reference {target_value:.1f} {unit} ({condition} the reference)."
+                )
+            elif factor_name == "Temperature":
+                condition = "above" if actual_value > target_value else "below"
+                explanation = (
+                    f"Temperature: entered {actual_value:.1f} {unit}, "
+                    f"crop reference {target_value:.1f} {unit} ({condition} the reference)."
+                )
+                action = (
+                    "Consider adjusting the sowing window to a more suitable season; "
+                    "use locally suitable mulching or shade practices where appropriate."
                 )
             else:
-                short_item = item
-            formatted.append(textwrap.fill(
-                short_item, width=88, initial_indent="  • ",
-                subsequent_indent="    "
-            ) + "\n")
-        return "\n".join(formatted)
+                condition = "below" if actual_value < target_value else "above"
+                explanation = (
+                    f"Soil pH: entered {actual_value:.1f}, crop reference "
+                    f"{target_value:.1f} ({condition} the reference)."
+                )
+                action = (
+                    "Confirm with a soil test, then use a locally recommended pH amendment "
+                    "such as lime for acidic soil or a suitable amendment for alkaline soil."
+                )
 
-    # Keep the first two practical sentences for the other guidance sections.
-    sentences = re.split(r"(?<=[.!?])\s+", value)
-    short_text = " ".join(sentences[:2]).strip()
-    return textwrap.fill(short_text, width=88, subsequent_indent="  ")
+            diagnostic_recommendations.append((explanation, action))
 
+        diagnostic_width = 88
+        diagnostic_inner_width = diagnostic_width - 4
+        diagnostic_border = "-" * (diagnostic_width - 2)
+        print("\n" + ("|" + diagnostic_border + "|").center(diagnostic_width))
+        print(("|" + " TWO MOST LIMITING CROP INPUTS ".center(diagnostic_width - 2) + "|").center(diagnostic_width))
+        print(("|" + f" {selected_crop} — suitability improvement guidance ".center(diagnostic_width - 2) + "|").center(diagnostic_width))
+        print(("|" + diagnostic_border + "|").center(diagnostic_width))
+        for explanation, action in diagnostic_recommendations:
+            for line in textwrap.wrap("- " + explanation, width=diagnostic_inner_width):
+                print(("| " + line.ljust(diagnostic_inner_width) + " |").center(diagnostic_width))
+            for line in textwrap.wrap("- Suggested change: " + action, width=diagnostic_inner_width):
+                print(("| " + line.ljust(diagnostic_inner_width) + " |").center(diagnostic_width))
+        print(("|" + diagnostic_border + "|").center(diagnostic_width) + "\n")
+    crop_rows = calendar_df[
+        (calendar_df.state == state)
+        & (calendar_df.district == district)
+        & (calendar_df.crop == selected_crop)
+    ]
 
-# Display each cultivation point heading in uppercase and centered.
-GUIDELINE_HEADING_WIDTH = 88
+    if crop_rows.empty:
+        raise ValueError(
+            "No crop calendar data found for this selection."
+        )
 
-for heading, column in sections:
-    print("\n" + heading.upper().center(GUIDELINE_HEADING_WIDTH))
-    print()
-    print(concise_guideline(guide[column], column) + "\n")
-
-# Storage is point 8; advice varies by the crop's harvested produce.
-family = crop_to_family.get(selected_crop, "general")
-if selected_crop in {"Potato", "Sweet potato", "Cassava"}:
-    storage_advice = (
-        "Sort out cut, diseased and damaged roots/tubers. Cure only as appropriate "
-        "for the crop, then store in a cool, dark, dry, well-ventilated place; "
-        "protect from direct sunlight and rodents."
+    # Use the selected crop's average rainfall from the real training dataset as
+    # its rainfall requirement when comparing the available sowing months.
+    crop_average_rainfall = float(
+        dataset_crop_profiles[selected_crop]["rainfall_mm"]
     )
-elif selected_crop in {"Onion", "Garlic"}:
-    storage_advice = (
-        "Cure bulbs/cloves in a dry, shaded, well-ventilated place until necks and "
-        "outer skins are dry. Remove damaged bulbs and store in mesh bags or "
-        "ventilated crates away from moisture."
-    )
-elif family in {"cereals", "pulses", "oilseeds", "fibre"}:
-    storage_advice = (
-        "Dry the harvested produce to the locally recommended safe storage "
-        "moisture before bagging. Store in clean, dry, pest-proof bins or bags, "
-        "raised off the floor and protected from rain and rodents."
-    )
-elif family in {"spices", "plantation"}:
-    storage_advice = (
-        "Dry or cure the harvested produce to the crop's recommended safe "
-        "moisture. Store in clean, airtight, moisture-proof packaging in a cool, "
-        "dry place; check regularly for mould or insects."
-    )
-elif family in {"fruit_crops", "cucurbits"}:
-    storage_advice = (
-        "Keep harvested produce in shade, remove damaged items and use clean, "
-        "ventilated crates. Cool promptly and store at the crop-appropriate "
-        "temperature; avoid chilling-sensitive conditions."
-    )
-elif family in {"leafy_herbs", "root_vegetables", "solanaceous", "brassicas"}:
-    storage_advice = (
-        "Remove damaged produce, keep it clean and out of direct sun, and cool "
-        "promptly. Use clean ventilated crates and crop-appropriate cool storage; "
-        "avoid excess moisture and crushing."
-    )
-else:
-    storage_advice = (
-        "Clean and grade the produce, remove damaged material, and keep it dry, "
-        "shaded and well ventilated. Use clean containers and the crop-appropriate "
-        "storage temperature and humidity."
+    monthly_district_rainfall = (
+        district_rain.groupby("month")["rainfall_mm"].mean().to_dict()
     )
 
-print("8. STORAGE GUIDANCE".center(GUIDELINE_HEADING_WIDTH))
-print()
-print(textwrap.fill(storage_advice, width=88, subsequent_indent="  ") + "\n")
+    def expected_seasonal_rainfall(sowing_month, crop_duration_days):
+        month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        remaining_days = int(crop_duration_days)
+        month = int(sowing_month)
+        total_rainfall = 0.0
 
-# Give the farmer a separate, crop-specific harvest instruction in its own box.
-harvest_text = concise_guideline(
-    guide["harvest_guidance"], "harvest_guidance"
-).strip()
-harvest_box_width = GUIDELINE_HEADING_WIDTH
-harvest_inner_width = harvest_box_width - 4
-harvest_lines = textwrap.wrap(
-    harvest_text, width=harvest_inner_width,
-    break_long_words=False, break_on_hyphens=False
-)
-print("+" + "-" * (harvest_box_width - 2) + "+")
-print("|" + " HARVESTING ADVICE ".center(harvest_box_width - 2) + "|")
-print("|" + " " * (harvest_box_width - 2) + "|")
-for harvest_line in harvest_lines:
-    print("| " + harvest_line.ljust(harvest_inner_width) + " |")
-print("+" + "-" * (harvest_box_width - 2) + "+\n")
+        while remaining_days > 0:
+            days_in_month = month_days[month - 1]
+            days_in_period = min(remaining_days, days_in_month)
+            monthly_average = float(
+                monthly_district_rainfall.get(
+                    month, district_rain["rainfall_mm"].mean()
+                )
+            )
+            total_rainfall += monthly_average * days_in_period / days_in_month
+            remaining_days -= days_in_period
+            month = month % 12 + 1
 
-print(
-    "\nExpected harvest date (estimated): ",
-    harvest_date.strftime("%d %B %Y")
-)
+        return total_rainfall
 
-print("\nGROWTH-STAGE TIMELINE")
-
-stages = [
-    ("Establishment", 0.10),
-    ("Vegetative growth", 0.35),
-    ("Flowering/reproductive", 0.65),
-    ("Fruit/grain development", 0.85),
-    ("Maturity and harvest", 1.00)
-]
-
-for i, (name, fraction) in enumerate(stages, 1):
-
-    stage_day = max(
-        1, int(duration * fraction)
+    crop_rows = crop_rows.copy()
+    crop_rows["expected_seasonal_rainfall_mm"] = crop_rows.apply(
+        lambda row: expected_seasonal_rainfall(
+            int(row.sowing_month), int(row.duration_days)
+        ),
+        axis=1
     )
 
-    stage_date = (
-        sowing_date + timedelta(days=stage_day)
+    crop_rows["rainfall_suitability"] = crop_rows[
+        "expected_seasonal_rainfall_mm"
+    ].apply(
+        lambda value: max(
+            0.0,
+            1.0 - abs(float(value) - crop_average_rainfall)
+            / max(crop_average_rainfall, 1.0)
+        )
+    )
+
+    # Yield is taken directly from the fixed crop-specific kg/ha benchmark.
+    # Historical/synthetic yield model outputs and synthetic calendar-yield multipliers
+    # are not used. Rainfall suitability is used only to choose the sowing window.
+    fixed_yield_per_acre = estimate_real_yield_tonnes_per_acre(
+        selected_crop, state, district
+    )
+    crop_rows = crop_rows.copy()
+    crop_rows["estimated_yield_tonnes_per_acre"] = fixed_yield_per_acre
+
+    best_months = crop_rows.sort_values(
+        "rainfall_suitability",
+        ascending=False
+    ).head(4)
+
+    best_sowing_month = int(
+        best_months.iloc[0].sowing_month
+    )
+
+    duration = int(CROP_DURATION[selected_crop])
+
+    estimated_yield_per_acre = float(
+        best_months.iloc[0].estimated_yield_tonnes_per_acre
+    )
+
+    total_yield = estimated_yield_per_acre * land_acres
+
+    today = date.today()
+
+    sowing_year = (
+        today.year
+        if best_sowing_month >= today.month
+        else today.year + 1
+    )
+
+    sowing_date = date(
+        sowing_year, best_sowing_month, 15
+    )
+
+    harvest_date = (
+        sowing_date + timedelta(days=duration)
+    )
+
+    print(f"\nSELECTED CROP: {selected_crop}")
+
+    print(
+        f"Estimated yield per acre: "
+        f"{estimated_yield_per_acre:.2f} tonnes"
     )
 
     print(
-        f"{i}. {name:<27} | "
-        f"{stage_date.strftime('%d %b %Y')}"
+        f"Estimated yield for {land_acres:.2f} acres: "
+        f"{total_yield:.2f} tonnes"
     )
 
-# Illustrative shelf-life estimates
+    # ================================================================
+    # MODULE 2: CROPCARE
+    # ================================================================
 
-PERISHABLE = {
-    "Tomato": (5, 10),
-    "Banana": (5, 12),
-    "Papaya": (4, 8),
-    "Mango": (5, 12),
-    "Spinach": (2, 5),
-    "Coriander": (2, 5),
-    "Grapes": (7, 21),
-    "Strawberry": (2, 7),
-    "Cucumber": (7, 14),
-    "Brinjal": (5, 10),
-    "Cauliflower": (5, 10),
-    "Cabbage": (10, 30),
-    "Potato": (30, 120),
-    "Onion": (30, 180),
-    "Garlic": (60, 180)
-}
+    print("\n" + "=" * 72)
+    print("HOW TO GROW AND CARE FOR YOUR CROP".center(72))
+    print("=" * 72)
 
-shelf_min, shelf_max = PERISHABLE.get(
-    selected_crop, (10, 30)
-)
+    guide = guidelines_df[
+        guidelines_df.crop == selected_crop
+    ].iloc[0].copy()
 
-print(
-    f"\nEstimated shelf life: "
-    f"{shelf_min}–{shelf_max} days (illustrative)"
-)
-
-# ================================================================
-# MODULE 3: MARKETSENSE
-# ================================================================
-
-print("\n" + "=" * 72)
-print("WHERE AND WHEN TO SELL YOUR HARVEST".center(72))
-print("=" * 72)
-
-markets_df["distance_km"] = markets_df.apply(
-    lambda row: haversine_km(
-        lat,
-        lon,
-        row.latitude_approx,
-        row.longitude_approx
-    ),
-    axis=1
-)
-
-nearby_real = (
-    markets_df[markets_df["market_type"] == "Real dataset market"]
-    .sort_values("distance_km")
-    .head(12)
-    .copy()
-)
-selected_district_virtuals = markets_df[
-    (markets_df["market_type"] == "Virtual planning location")
-    & (markets_df["state"].astype(str).str.casefold() == state.casefold())
-    & (markets_df["district"].astype(str).str.casefold() == district.casefold())
-].sort_values("distance_km").copy()
-
-nearby = pd.concat(
-    [nearby_real, selected_district_virtuals],
-    ignore_index=True
-)
-if nearby.empty:
-    nearby = markets_df.sort_values("distance_km").head(12).copy()
-
-market_names = nearby.market.tolist()
-
-# ------------------------- REAL MARKET PRICE ESTIMATES -------------------------
-
-market_commodity_aliases = {
-    "Rice": ["Rice", "Paddy(Common)", "Paddy(Other)"],
-    "Maize": ["Maize"],
-    "Chickpea": ["Chickpea", "Chick Peas", "Bengal Gram(Gram)", "Bengal Gram", "Gram", "Chana", "Kabuli Chana", "Desi Chana"],
-    "Kidney bean": ["Kidney beans", "Beans", "French beans"],
-    "Pigeon pea": ["Pigeon pea", "Arhar (Tur/Red Gram)", "Tur"],
-    "Moth beans": ["Moth beans", "Moth"],
-    "Green gram": ["Green gram", "Green Gram(Moong)", "Moong"],
-    "Black gram": ["Black gram", "Black Gram(Urd Beans)", "Urad"],
-    "Lentil": ["Lentil", "Masur"],
-    "Pomegranate": ["Pomegranate"],
-    "Banana": ["Banana"],
-    "Mango": ["Mango"],
-    "Grapes": ["Grapes"],
-    "Watermelon": ["Watermelon"],
-    "Muskmelon": ["Muskmelon"],
-    "Apple": ["Apple"],
-    "Orange": ["Orange"],
-    "Papaya": ["Papaya"],
-    "Coconut": ["Coconut"],
-    "Cotton": ["Cotton"],
-    "Jute": ["Jute"],
-    "Coffee": ["Coffee"]
-}
-
-available_commodities = market_price_rows["Commodity"].dropna().astype(str).unique().tolist()
-commodity_aliases = market_commodity_aliases.get(selected_crop, [selected_crop])
-selected_commodity_names = [
-    commodity for commodity in available_commodities
-    if any(commodity.casefold() == alias.casefold() for alias in commodity_aliases)
-]
-
-if not selected_commodity_names:
-    fuzzy_match = process.extractOne(
-        selected_crop, available_commodities, scorer=fuzz.WRatio
-    )
-    if fuzzy_match and fuzzy_match[1] >= 88:
-        selected_commodity_names = [fuzzy_match[0]]
-
-crop_market_data = market_price_rows[
-    market_price_rows["Commodity"].isin(selected_commodity_names)
-].copy()
-
-if not crop_market_data.empty:
-    # Keep one comparable commodity/variety/grade series instead of mixing
-    # differently graded produce into a single price trend.
-    reference_commodity = str(crop_market_data["Commodity"].mode().iloc[0])
-    commodity_rows = crop_market_data[
-        crop_market_data["Commodity"].astype(str).str.casefold() == reference_commodity.casefold()
-    ].copy()
-    reference_variety = str(commodity_rows["Variety"].mode().iloc[0])
-    variety_rows = commodity_rows[
-        commodity_rows["Variety"].astype(str).str.casefold() == reference_variety.casefold()
-    ].copy()
-    reference_grade = str(variety_rows["Grade"].mode().iloc[0])
-    crop_market_data = variety_rows[
-        variety_rows["Grade"].astype(str).str.casefold() == reference_grade.casefold()
-    ].copy()
-    crop_market_data = crop_market_data.groupby(
-        ["State", "District", "Market", "Commodity", "Variety", "Grade", "Arrival_Date",
-         "arrival_date_ordinal", "arrival_month_sin", "arrival_month_cos"],
-        as_index=False
-    )["Modal_x0020_Price"].median()
-
-# Restrict market comparisons to markets with real observations for the selected
-# commodity/variety/grade. If none of the initially nearest markets has such data,
-# select the nearest markets that do; do not invent prices for unrelated markets.
-if not crop_market_data.empty:
-    crop_market_keys = crop_market_data[["State", "District", "Market"]].drop_duplicates()
-    nearby_with_crop_history = markets_df.merge(
-        crop_market_keys,
-        left_on=["state", "district", "market"],
-        right_on=["State", "District", "Market"],
-        how="inner"
-    )
-    if not nearby_with_crop_history.empty:
-        nearby_real_with_history = (
-            nearby_with_crop_history.sort_values("distance_km").head(12).copy()
+    # Tea-specific crop-care corrections. These replace generic placeholder text in
+    # the precomputed guide with Tea-specific symptoms, monitoring and field practices.
+    if selected_crop == "Tea":
+        guide["land_preparation"] = (
+            "Choose a well-drained, deep soil rich in organic matter, preferably acidic "
+            "(about pH 4.5–5.5). Prepare contour-aligned planting rows on slopes and "
+            "provide drainage without allowing waterlogging."
         )
-        nearby = pd.concat(
-            [nearby_real_with_history, selected_district_virtuals],
-            ignore_index=True
+        guide["fertilizer_application"] = (
+            "Apply well-decomposed organic matter and use split, soil-test-guided "
+            "fertilizer doses suited to bush age and plucking yield. Avoid blanket "
+            "phosphorus or potassium applications when soil tests show high levels."
         )
-        market_names = nearby.market.tolist()
+        guide["nutrient_guidance"] = (
+            "Tea prefers acidic soil and balanced nutrition. Monitor soil pH, organic "
+            "matter and leaf nutrient status; base nitrogen, phosphorus and potassium "
+            "applications on local tea-research recommendations and soil or leaf tests."
+        )
+        guide["monitoring"] = (
+            "Inspect young leaves, tender shoots and the undersides of mature leaves "
+            "weekly. Watch for blister-like lesions, brown-grey leaf spots, shoot "
+            "distortion, bronzing and mite activity, especially during humid weather."
+        )
+        guide["common_diseases"] = (
+            "Blister blight: Small translucent spots enlarge on young leaves; raised "
+            "blisters form mainly on the underside and may turn white and velvety. "
+            "Prevention/management: Improve airflow, avoid prolonged leaf wetness, "
+            "remove affected shoots where practical and follow local tea-extension advice.\n"
+            "Grey blight: Brown or grey leaf lesions develop with concentric rings and "
+            "tiny dark spore-bearing dots; affected tissue may dry and fall. "
+            "Prevention/management: Reduce plant stress, maintain suitable spacing, "
+            "avoid unnecessary leaf injury and remove badly affected material."
+        )
+        guide["common_pests"] = (
+            "Tea mosquito bug: Feeding on tender shoots causes dark necrotic patches, "
+            "curling and dieback of young growth. Prevention/management: Inspect flush "
+            "and tender shoots regularly, prune affected parts where appropriate and "
+            "seek local threshold-based advice before treatment.\n"
+            "Red spider mite: Feeding causes fine stippling, bronzing and a dull or "
+            "rough appearance, often on mature leaves. Prevention/management: Check "
+            "leaf undersides with a hand lens, reduce plant water stress and conserve "
+            "predatory mites."
+        )
+        guide["ipm_guidance"] = (
+            "Scout the plucking table and leaf undersides weekly. Record affected "
+            "sections, remove localised infested or diseased material when practical, "
+            "maintain drainage and canopy airflow, conserve natural enemies and use "
+            "only locally registered products when recommended by tea specialists."
+        )
+        guide["harvest_guidance"] = (
+            "Pluck the tender shoot consisting of the unopened terminal bud and the "
+            "two youngest leaves. Keep plucked leaves clean, shaded and ventilated, "
+            "and transport them promptly for processing."
+        )
 
-price_estimates_are_synthetic = False
+    # ---------------- CROP-SPECIFIC FIELD PRACTICE GENERATOR ----------------
+    # One independently generated set of nine actionable recommendations is built
+    # for every crop in CROPS. Crop traits below determine the advice; no generic
+    # "do the same for every crop" block is used. Numeric fertilizer/pesticide rates
+    # are intentionally omitted unless confirmed by a local soil test and current
+    # State Agricultural University / KVK package of practices.
+    CROP_PRACTICE_TRAITS = {
+        "Rice": ("certified seed or healthy seedlings", "grain panicles", "puddled lowland or well-levelled aerobic field as the variety requires", "maintain water only at the locally recommended crop stage; avoid prolonged unnecessary flooding", "split nitrogen and balanced phosphorus/potassium based on soil test and crop stage", "nursery, tillers, leaf colour, stem borer symptoms and neck/panicle lesions", "harvest when most panicles are mature and grains have reached the locally recommended moisture", "dry grain uniformly to safe storage moisture before sealing in clean, rodent-proof bins"),
+        "Wheat": ("certified, locally recommended seed", "grain ears", "fine, level seedbed with good drainage and a firm seed zone", "provide timely irrigation at critical stages, especially crown-root initiation and grain filling", "base basal phosphorus/potassium and split nitrogen on soil test and local wheat package", "tillers, flag leaf, rust pustules, aphids and ear development", "cut when ears and straw turn golden and grains are hard", "clean and dry grain to safe moisture; store in insect-proof dry bins"),
+        "Maize": ("treated certified seed of a locally adapted hybrid or variety", "cobs and kernels", "well-drained field with fine tilth and rows that permit interculture", "avoid water stress around tasselling, silking and early kernel fill; prevent waterlogging", "place phosphorus and potassium according to soil test; split nitrogen around rapid vegetative growth and before tasselling", "whorl, stem base, tassels, silks, ear formation and fall-armyworm damage", "harvest cobs when husks dry and kernels are firm at the intended grain or green-cob stage", "dry shelled grain thoroughly and store in clean moisture-proof insect-safe containers"),
+        "Sorghum": ("certified seed of a locally adapted sorghum variety", "grain panicles or green fodder", "well-drained seedbed with firm rows and no standing water", "use rainfall efficiently; provide lifesaving irrigation at booting/flowering if available", "apply soil-test-based nutrients and avoid excess nitrogen where lodging or fodder-quality risk is high", "whorl, shoot fly dead-hearts, midge damage, grain mould and bird pressure", "harvest panicles after grains harden and dry; cut fodder at the locally recommended stage", "dry grain well and protect stored panicles or fodder from moisture and mould"),
+        "Pearl millet": ("certified seed of a locally adapted downy-mildew-tolerant variety", "grain earheads or green fodder", "fine but not powdery seedbed with drainage and a firm seed zone", "sow with dependable soil moisture and conserve moisture through timely interculture", "use soil-test-guided basal nutrients; avoid excessive nitrogen in drought-prone fields", "seedling stage, downy mildew symptoms, shoot fly and earhead development", "cut earheads when grains are hard and mature; harvest fodder at the recommended leafy stage", "dry earheads and grain promptly; store in clean, dry, pest-proof containers"),
+        "Finger millet": ("certified seed or healthy, uniform nursery seedlings", "grain fingers", "fine, level seedbed or puddled nursery/field where the local transplanting system is used", "maintain moisture during establishment and flowering; drain excess water", "combine well-decomposed organic manure with soil-test-based balanced fertilizer", "seedling establishment, blast lesions on leaves/necks and weed competition", "harvest when earheads turn brown and grains are firm", "dry earheads thoroughly, thresh cleanly and store grain away from moisture"),
+        "Barley": ("certified seed of a locally adapted barley variety", "grain spikes", "well-prepared, well-drained seedbed with a fine tilth", "schedule limited irrigation at locally critical stages and avoid late excess water", "apply nutrients according to soil test and intended grain, malt or fodder use", "tillers, leaf rust, powdery mildew, aphids and grain filling", "harvest when spikes are straw-coloured and grains are hard", "dry grain uniformly and keep malting or feed lots separately in clean dry storage"),
+        "Oats": ("certified seed of a grain or fodder oat variety suited to the purpose", "grain panicles or leafy forage", "fine, moist but well-drained seedbed", "maintain even moisture during establishment and stem elongation; avoid waterlogging", "base nitrogen on soil fertility and whether the crop is for grain or repeated fodder cuts", "tiller density, leaf rust, aphids and forage regrowth after cutting", "cut fodder at the recommended leafy/boot stage or harvest grain when panicles and kernels mature", "dry grain before storage; cool and protect hay from rain during curing and stacking"),
+        "Chickpea": ("certified seed of a locally recommended wilt-tolerant variety", "dry pods and seed", "friable, well-drained seedbed; avoid compacted and waterlogged patches", "avoid excess irrigation; protect flowering and pod filling from severe moisture stress", "use soil-test-based basal phosphorus and appropriate rhizobial inoculation where recommended; avoid excessive nitrogen", "collar/root wilt, dry root rot, pod borer eggs/larvae and pod set", "harvest when most plants yellow and pods are dry; avoid shattering losses", "dry seed to safe moisture, clean and store in sealed insect-proof containers"),
+        "Pigeon pea": ("certified seed of a locally adapted, wilt- and sterility-mosaic-tolerant variety", "mature pods and seed", "deep, well-drained field; provide drainage and avoid prolonged saturation", "establish with monsoon moisture; irrigate only at critical flowering/pod-filling stages if needed", "use soil-test-guided phosphorus, potassium and sulphur; inoculate seed where recommended", "wilt, sterility mosaic symptoms, pod fly, pod borer and flowering", "pick or harvest when most pods turn brown and dry, with repeated picking for suitable varieties", "sun-dry pods/seed safely, thresh and store dry seed in pest-proof containers"),
+        "Green gram": ("certified, disease-free seed of a locally recommended short-duration variety", "pods and seed", "fine, well-drained seedbed with good drainage after rain", "avoid waterlogging; provide moisture at flowering and pod filling if rainfall fails", "apply soil-test-based phosphorus and potassium; use Rhizobium/PSB inoculants if locally recommended", "yellow mosaic symptoms, whitefly, thrips, powdery mildew and pod maturity", "pick mature pods in more than one round before they split", "dry pods before threshing and store clean seed at safe moisture"),
+        "Black gram": ("certified seed of a locally recommended yellow-mosaic-tolerant variety", "pods and seed", "well-drained fine seedbed; use raised beds in heavy-rainfall fields", "avoid standing water and maintain moisture during flowering and pod filling", "base phosphorus, potassium and sulphur on soil test; inoculate seed where recommended", "yellow mosaic, leaf crinkle, whitefly, thrips and pod borer", "harvest pods as they turn black and dry; use multiple pickings where maturity is uneven", "dry pods/seed thoroughly and store in clean, dry insect-proof containers"),
+        "Lentil": ("certified seed of a locally recommended wilt-tolerant lentil variety", "pods and seed", "fine, firm, well-drained seedbed; avoid late sowing and waterlogged soil", "use residual soil moisture efficiently; avoid heavy irrigation and waterlogging", "apply soil-test-guided phosphorus, sulphur and micronutrients only where deficient; inoculate if advised", "wilt, rust, stemphylium blight, aphids and pod filling", "harvest when lower pods turn brown and plants dry without excessive shattering", "dry seed to safe moisture and store in a cool, dry, insect-proof place"),
+        "Field pea": ("certified seed of a locally adapted disease-tolerant pea variety", "green pods or dry seed", "well-drained, friable seedbed with support/trellis where the variety needs it", "maintain even moisture at flowering and pod filling; avoid saturated soil", "use soil-test-based phosphorus and potassium; avoid heavy nitrogen where nodulation is effective", "powdery mildew, downy mildew, aphids, pod borer and tendril/vine growth", "pick green pods at full size while tender or harvest dry pods when mature", "cool fresh pods promptly; dry seed thoroughly before sealed storage"),
+        "Kidney bean": ("certified disease-free seed of a locally adapted bush or pole type", "green pods or dry beans", "well-drained raised or flat beds with friable soil; provide trellis for pole types", "keep moisture even during flowering and pod set; avoid waterlogging", "use soil-test-based phosphorus and potassium and moderate nitrogen; support effective nodulation", "angular leaf spot, anthracnose, rust, bean fly and pod development", "pick snap pods while tender or harvest dry pods when most leaves yellow and pods dry", "cool fresh beans quickly; dry mature seed well and store moisture-proof"),
+        "Soybean": ("certified seed of a locally adapted, yellow-mosaic and rust-tolerant variety", "pods and seed", "well-drained field with fine tilth and effective drainage furrows", "avoid waterlogging; maintain moisture through flowering, pod formation and seed fill", "inoculate with crop-specific Bradyrhizobium where recommended; use soil-test-based phosphorus, potassium and sulphur", "germination, nodulation, girdle beetle, defoliators, rust and pod fill", "harvest when most pods are brown and leaves have fallen; avoid field shattering", "dry seed carefully to safe moisture and store clean lots in dry pest-proof storage"),
+        "Groundnut": ("certified kernels of a locally adapted disease-tolerant groundnut variety", "underground pods", "loose, friable, well-drained sandy loam that permits peg penetration and digging", "maintain moisture at flowering, pegging and pod development; avoid waterlogging", "use soil-test-based gypsum/calcium near pegging where locally recommended and balanced phosphorus/potassium", "leaf spots, rust, stem rot, thrips, leaf miner and pegging", "check pod maturity by shell/seed development and harvest at the recommended maturity window", "dry pods on clean surfaces to safe moisture; protect kernels from rain and aflatoxin risk"),
+        "Mustard": ("certified seed of a locally recommended mustard variety", "siliquae and seed", "fine, firm, well-drained seedbed for uniform small-seed placement", "avoid water stress at flowering and siliqua formation; do not over-irrigate near maturity", "apply soil-test-based sulphur with balanced NPK; split nitrogen according to local recommendations", "aphids, painted bug, Alternaria blight, white rust and siliqua filling", "harvest when siliquae turn yellow-brown but before they shatter", "dry bundles on a clean sheet, thresh and store seed at safe moisture"),
+        "Sesame": ("certified seed of a locally adapted phyllody-tolerant sesame variety", "capsules and seed", "fine, well-drained seedbed; avoid crusting and waterlogged depressions", "sow into adequate moisture and avoid waterlogging; irrigate lightly only when needed", "use soil-test-based NPK and sulphur; avoid excess nitrogen that delays maturity", "phyllody, leaf spots, gall fly, leaf webber and capsule maturity", "harvest when lower capsules begin turning yellow and before capsules split", "dry harvested plants upright or on a clean sheet; thresh and store dry seed"),
+        "Sunflower": ("certified seed of a locally adapted hybrid or variety", "seed heads and achenes", "deep, well-drained seedbed with uniform stand and space for head development", "maintain moisture at bud initiation, flowering and seed filling; avoid waterlogging", "base NPK and boron on soil test and local recommendation; avoid excessive nitrogen", "head borer, capitulum rot, downy mildew, bird damage and seed fill", "harvest when back of head turns yellow-brown and seeds are firm", "dry heads thoroughly, thresh and store seed in clean moisture-proof conditions"),
+        "Safflower": ("certified seed of a locally adapted wilt-tolerant safflower variety", "spiny or non-spiny flower heads and seed", "deep, well-drained field with firm seedbed and suitable row access", "use stored soil moisture; irrigate only at locally critical stages and avoid waterlogging", "apply soil-test-guided balanced NPK and sulphur; avoid excess nitrogen", "aphids, wilt, Alternaria leaf spot and head development", "harvest when leaves and heads are dry and seeds detach readily", "dry heads, thresh carefully and store seed dry in pest-proof containers"),
+        "Linseed": ("certified seed of a locally recommended linseed variety", "capsules and seed", "fine, firm, well-drained seedbed for shallow, uniform sowing", "maintain moisture during establishment and flowering; avoid late excess irrigation", "apply soil-test-based NPK and sulphur; avoid excessive nitrogen that promotes lodging", "powdery mildew, rust, bud fly, aphids and capsule filling", "harvest when most capsules turn brown and seed is firm", "dry plants before threshing; store clean seed in a dry, cool place"),
+        "Castor": ("certified seed of a locally adapted wilt- and capsule-rot-tolerant castor variety", "spiny capsules and seed", "deep, well-drained soil with adequate space for branching and raceme development", "establish with dependable moisture; avoid prolonged waterlogging and moisture stress at flowering", "use soil-test-based NPK and split nitrogen according to branching and raceme development", "semilooper, capsule borer, wilt, root rot and raceme maturity", "harvest mature dry racemes in rounds as capsules brown; avoid shattering", "dry capsules safely, shell and store seed in dry ventilated containers"),
+        "Cotton": ("certified, treated seed of a locally recommended Bt/non-Bt cultivar as legally approved", "open cotton bolls and lint", "deep, well-drained field with ridges/furrows and no compacted hardpan", "avoid water stress at flowering and boll development; provide drainage during heavy rain", "base NPK and potassium on soil test; split nitrogen and avoid late excess nitrogen", "pink bollworm rosette flowers, whitefly, jassids, bollworms and boll opening", "pick fully opened dry bolls in clean successive pickings; avoid wet or stained kapas", "keep kapas dry and clean, separate stained lots and store off the floor"),
+        "Jute": ("certified seed of a locally adapted fibre jute variety", "bast fibre from mature stems", "fine, level seedbed with adequate moisture and drainage; prepare a fine tilth", "maintain moisture during establishment and rapid stem growth; avoid prolonged flooding", "use soil-test-based balanced nutrients and incorporate well-decomposed organic manure", "stand density, stem borer, semilooper, mite damage and leaf spot", "harvest at the locally recommended early pod/flowering stage for desired fibre quality", "ret after harvest using clean water and recommended retting practice; dry fibre thoroughly"),
+        "Sugarcane": ("healthy, disease-free setts or approved single-bud planting material", "mature cane stalks", "deep, fertile, well-drained furrows with planned irrigation and drainage", "schedule irrigation by soil and crop stage; avoid both prolonged drought and waterlogging", "apply organic matter and soil-test-based NPK in split doses; earth up and avoid late nitrogen", "germination gaps, shoot borer, early shoot borer, smut, red rot and lodging", "harvest when cane is mature by local juice-quality/Brix checks and mill schedule", "deliver promptly after cutting; protect setts and harvested cane from drying and contamination"),
+        "Potato": ("healthy, certified, disease-free seed tubers of suitable size", "tubers", "loose, friable, stone-free raised ridges with good drainage", "maintain even moisture during tuber initiation and bulking; avoid waterlogging and severe fluctuations", "use soil-test-based NPK; split nitrogen and hill plants before tubers are exposed", "late blight, early blight, bacterial wilt, aphids, tuber moth and exposed tubers", "harvest after haulms senesce and skin sets; avoid digging wet soil", "cure as locally recommended, then store in a dark, ventilated, crop-appropriate cool store"),
+        "Sweet potato": ("healthy, disease-free vine cuttings from a true-to-type mother crop", "storage roots", "loose ridges or mounds that allow root expansion and drainage", "keep moisture steady during establishment and root bulking; avoid prolonged saturation", "avoid excessive nitrogen; use soil-test-based potassium and phosphorus for storage-root development", "weevils, virus symptoms, scurf, root rot and cracking", "sample roots for market size and harvest before roots become oversized or damaged", "cure sound roots where locally practiced and store in ventilated, protected conditions"),
+        "Cassava": ("healthy, mature stem cuttings from disease-free mother plants", "storage roots and planting stems", "deep, loose, well-drained ridges or mounds to ease root development and harvest", "establish cuttings with reliable moisture; avoid waterlogging and prolonged drought", "apply organic matter and soil-test-based potassium and other nutrients; recycle healthy tops appropriately", "cassava mosaic symptoms, mites, mealybugs, root rot and stem health", "harvest roots at the variety's maturity and market size; avoid leaving damaged roots in soil", "process or market roots promptly because fresh roots deteriorate quickly; store cuttings separately"),
+        "Onion": ("healthy nursery seedlings or sets of a locally adapted onion type", "bulbs", "fine, level, well-drained beds with uniform soil tilth", "maintain even shallow-root-zone moisture during bulb formation; reduce irrigation near maturity", "use soil-test-based NPK and sulphur; avoid late nitrogen that delays neck fall and curing", "purple blotch, downy mildew, thrips, bulb rot and neck fall", "harvest after tops fall naturally and necks begin drying; avoid bruising bulbs", "cure bulbs in shade with airflow until necks and skins dry; store in ventilated mesh/crates"),
+        "Garlic": ("healthy, disease-free cloves of a locally adapted variety", "bulbs and cloves", "friable, well-drained raised beds with fine tilth", "keep moisture even during leaf growth and bulb development; stop irrigation before lifting", "apply soil-test-based NPK and sulphur; avoid excess nitrogen late in the season", "purple blotch, rust, thrips, basal rot and leaf-tip drying", "lift when lower leaves yellow and tops begin drying; avoid injury to bulbs", "cure whole plants in shade with airflow, trim only after drying and store dry bulbs ventilated"),
+        "Tomato": ("healthy, hardened, disease-free nursery seedlings or grafted plants where advised", "ripe or mature-green fruits", "raised beds or ridges with drainage, staking rows and rotation away from solanaceous crops", "use drip or careful furrow irrigation; keep moisture even and avoid wet foliage and waterlogging", "base NPK and calcium on soil/leaf tests; split nutrients through flowering and fruit load", "early/late blight, bacterial wilt, leaf curl virus, fruit borer, whitefly and cracking", "pick at breaker/red-ripe stage required by the market; use clean clippers and avoid bruising", "sort and shade immediately; use ventilated crates and market promptly or cool appropriately"),
+        "Brinjal": ("healthy, hardened seedlings of a locally adapted wilt and shoot-borer-tolerant variety", "tender mature fruits", "raised beds with drainage and rotation away from solanaceous crops", "maintain even moisture during flowering and fruit enlargement; avoid waterlogging", "apply soil-test-based NPK in split doses according to repeated fruit picking", "shoot and fruit borer entry holes, bacterial wilt, little-leaf symptoms, mites and aphids", "pick glossy fruits at market size before seeds harden; remove overmature fruits", "keep fruits shaded, unbruised and ventilated; market promptly"),
+        "Chilli": ("healthy, hardened seedlings of a locally adapted virus-tolerant variety", "green or red mature pods", "raised, well-drained beds with rotation and good airflow", "use regular light irrigation; avoid waterlogging and moisture swings during flowering", "use soil-test-based NPK and sulphur; avoid excess nitrogen that produces soft vegetative growth", "leaf curl, thrips, mites, anthracnose/fruit rot, wilt and flower drop", "pick green pods at full size or red pods when fully coloured, according to market", "dry red chilli on clean raised mats to safe moisture or cool fresh pods promptly"),
+        "Capsicum": ("healthy, hardened disease-free seedlings of a locally suitable cultivar", "green, coloured or mature fruits", "raised beds with good drainage, mulch and support/staking where needed", "maintain uniform moisture through flowering and fruit set; avoid waterlogging and heat stress", "split balanced NPK and calcium/potassium according to soil/leaf tests and fruit load", "blossom-end rot, bacterial spot, anthracnose, thrips, mites and sunscald", "harvest firm fruits at the colour stage specified by the market; cut with a short stalk", "shade immediately, avoid compression and cool at crop-appropriate conditions"),
+        "Cabbage": ("healthy, hardened seedlings of a locally adapted head-forming variety", "compact heads", "raised beds with good drainage and rotation away from crucifers", "maintain even moisture during head formation; avoid water stress and waterlogging", "apply soil-test-based NPK and sulphur; split nitrogen early and avoid excess near maturity", "diamondback moth, cabbage butterfly, aphids, black rot, clubroot and head splitting", "cut firm, compact heads before splitting; retain wrapper leaves for protection", "remove field heat, keep heads clean and cool, and use ventilated crates"),
+        "Cauliflower": ("healthy, age-appropriate nursery seedlings of a season-suitable variety", "curds", "well-drained raised beds with uniform fertility and suitable pH", "maintain steady moisture during curd initiation and development; avoid waterlogging", "base NPK, boron and molybdenum corrections on soil test and local deficiency diagnosis", "buttoning, riceyness, black rot, downy mildew, diamondback moth and aphids", "harvest compact white curds before loosening or discolouration; blanch only where variety requires", "trim carefully, shade and cool promptly; avoid bruising curds"),
+        "Broccoli": ("healthy, hardened seedlings of a locally adapted broccoli cultivar", "central and side-shoot flower heads", "fertile, well-drained raised beds with rotation away from crucifers", "maintain even moisture during head development; avoid heat and water stress", "use soil-test-based NPK with adequate boron only where deficiency is confirmed", "head looseness, hollow stem, downy mildew, black rot and caterpillars", "cut tight green heads before flower buds loosen; allow side shoots if marketable", "cool rapidly, keep heads shaded and use ventilated chilled storage"),
+        "Okra": ("healthy, treated seed of a locally adapted yellow-vein-mosaic-tolerant variety", "tender immature pods", "well-drained ridges or beds with friable soil and accessible picking rows", "maintain moisture during flowering and pod development; avoid standing water", "apply soil-test-based balanced NPK; split nitrogen without encouraging excessive leafy growth", "yellow vein mosaic, jassids, whitefly, shoot/fruit borer and pod fibre development", "pick tender pods frequently before they become fibrous; use gloves if spines irritate", "keep pods shaded and cool promptly; market quickly in ventilated crates"),
+        "Cucumber": ("healthy seed of a locally adapted hybrid or open-pollinated cultivar", "immature fruits", "raised beds or ridges with drainage, mulch and trellis where useful", "provide uniform moisture during flowering and fruit enlargement; avoid wet foliage", "use soil-test-based NPK and split nutrients through fruiting; avoid excessive nitrogen", "powdery/downy mildew, mosaic virus, fruit fly, aphids and misshapen fruits", "pick fruits at the target size while skin is tender and seeds remain soft", "shade immediately, avoid stacking pressure and cool at a non-chilling temperature"),
+        "Pumpkin": ("healthy seed of a locally adapted pumpkin cultivar", "mature fruits", "mounds or broad beds with ample vine space and good drainage", "water at establishment and fruit enlargement; avoid waterlogging and wet fruit contact", "incorporate mature compost and use soil-test-based potassium and balanced nutrients", "powdery mildew, downy mildew, fruit fly, mosaic, vine borer and fruit rot", "harvest when rind hardens and stem begins corking; leave a short stem attached", "cure sound fruits where appropriate and store in a dry, ventilated shaded place"),
+        "Bottle gourd": ("healthy seed of a locally adapted bottle-gourd type", "tender immature fruits", "raised beds with trellis or strong support and drainage", "maintain even moisture during flowering and fruit elongation; avoid waterlogging", "use compost and soil-test-based NPK; avoid excessive nitrogen that delays fruiting", "fruit fly, mosaic virus, powdery mildew, downy mildew and misshapen fruits", "pick tender fruits at market length before rind hardens and seeds enlarge", "shade and market promptly; avoid bruising and moisture loss"),
+        "Bitter gourd": ("healthy seed of a locally adapted bitter-gourd cultivar", "tender green fruits", "raised beds with trellis and drainage; rotate away from cucurbits", "maintain even moisture at flowering and fruit set; avoid waterlogging", "apply well-decomposed compost and soil-test-based NPK in split doses", "fruit fly, downy mildew, powdery mildew, mosaic and fruit deformity", "pick green fruits before they turn yellow or seeds harden; harvest frequently", "keep fruits shaded and ventilated; avoid prolonged storage and compression"),
+        "Ridge gourd": ("healthy seed of a locally adapted ridge-gourd cultivar", "tender ridged fruits", "raised beds with trellis and free drainage", "maintain steady moisture during vine growth and fruiting; avoid saturated roots", "use mature compost and soil-test-based balanced NPK; avoid late excess nitrogen", "fruit fly, mosaic, powdery mildew, downy mildew and fruit borer damage", "pick fruits while ridges are tender and before fibres develop", "shade, sort and market promptly in ventilated crates"),
+        "Watermelon": ("certified seed of a locally adapted, disease-tolerant watermelon variety", "mature fruits", "sandy-loam raised beds or ridges with excellent drainage and vine space", "maintain moisture through fruit set and early enlargement; reduce excess irrigation near maturity", "use soil-test-based NPK and potassium; avoid excess nitrogen during fruiting", "wilt, gummy stem blight, powdery mildew, fruit fly and hollow/poorly filled fruits", "confirm maturity using tendril drying, ground-spot change and variety-specific sound/field cues", "handle without impact, keep shaded and store at a suitable non-chilling temperature"),
+        "Muskmelon": ("certified seed of a locally adapted muskmelon cultivar", "mature netted or smooth fruits", "well-drained raised beds with warm soil and space for vine spread", "maintain moisture during establishment and fruit set; avoid excess water near ripening", "use soil-test-based NPK with potassium emphasis during fruit development", "powdery mildew, downy mildew, aphids, fruit fly and uneven fruit maturity", "harvest at the cultivar's slip/netting/aroma maturity stage for the intended market", "avoid bruising; cool and market promptly according to cultivar storage tolerance"),
+        "Carrot": ("certified seed of a locally adapted, market-type carrot variety", "storage roots", "deep, stone-free, loose raised beds with fine tilth and no hardpan", "maintain uniform moisture from germination through root enlargement; avoid drying and cracking", "use well-decomposed organic matter and soil-test-based nutrients; avoid fresh manure and excess nitrogen", "root-knot nematode, cavity spot, leaf blight, forking and cracking", "harvest when roots reach market diameter and colour without becoming woody", "remove tops, wash hygienically, cool promptly and maintain high humidity without free water"),
+        "Radish": ("certified seed of a locally adapted radish type", "swollen taproots", "loose, stone-free, well-drained soil for straight root development", "keep soil evenly moist; irregular watering causes pithiness and cracking", "avoid fresh manure and excess nitrogen; base balanced nutrients on soil test", "root maggot, aphids, leaf spot, forking and pithiness", "harvest at the recommended root diameter while crisp and before pithiness", "remove tops, wash and cool promptly; market quickly"),
+        "Beetroot": ("certified seed or seed clusters of a locally adapted beet variety", "swollen roots and edible tops", "deep, friable, stone-free beds with good drainage", "maintain uniform moisture during root bulking; avoid drought followed by heavy irrigation", "use soil-test-based balanced nutrients; avoid excessive nitrogen that favours tops", "leaf miner, cercospora leaf spot, damping-off and root cracking", "lift when roots reach market size and remain tender", "remove tops, wash carefully and cool roots promptly"),
+        "Turnip": ("certified seed of a locally adapted turnip variety", "swollen roots and edible tops", "fine, loose, stone-free beds with reliable drainage", "maintain even moisture to prevent woody or cracked roots", "use mature compost and soil-test-based balanced nutrition; avoid excess nitrogen", "flea beetles, aphids, clubroot, leaf spots and root pithiness", "harvest roots at the recommended tender size before they become fibrous", "remove tops, clean and cool promptly; keep roots humid but not waterlogged"),
+        "Spinach": ("certified seed of a locally adapted spinach variety", "tender leaves and rosettes", "fine, fertile, well-drained beds with organic matter", "keep the shallow root zone consistently moist; avoid waterlogging and leaf wetness late in the day", "use modest soil-test-based nitrogen in split doses; avoid excess nitrate accumulation", "leaf miner, aphids, downy mildew, leaf spots and bolting", "cut outer leaves or harvest whole rosettes while leaves are tender and before bolting", "wash hygienically, drain, cool rapidly and maintain cold chain"),
+        "Amaranth": ("certified seed of a locally adapted leafy or grain amaranth type", "tender leaves, shoots or grain panicles", "fine, fertile, well-drained beds or rows", "maintain moisture for tender leaf growth; avoid prolonged saturation", "apply compost and soil-test-based nitrogen in split doses for leafy harvest; avoid excess", "leaf webber, stem weevil, leaf spots, damping-off and premature flowering", "cut tender shoots repeatedly or harvest grain panicles when seed is mature", "keep leafy produce shaded and cool; dry grain panicles before threshing"),
+        "Fenugreek": ("certified seed of a locally adapted leafy or seed fenugreek type", "tender leaves or mature pods/seeds", "fine, well-drained seedbed with shallow uniform sowing", "provide light, timely irrigation; avoid waterlogging and excess moisture near seed maturity", "use compost and soil-test-based modest nitrogen and phosphorus; inoculation may be used if recommended", "aphids, powdery mildew, root rot and uneven stand", "cut leaves before flowering for greens or harvest pods when mature and dry for seed", "cool leafy harvest promptly; dry seed thoroughly and store airtight"),
+        "Coriander": ("certified seed of a locally adapted leaf or seed coriander type", "fresh leaves or dry fruits/seeds", "fine, well-drained bed with split coriander fruits sown at uniform shallow depth", "maintain moisture during emergence and leaf growth; avoid waterlogging", "use mature compost and soil-test-based balanced nutrients; avoid excess nitrogen for seed crop", "aphids, stem gall, powdery mildew, wilt and premature bolting", "cut leaves before flowering or harvest umbels when fruits turn straw-coloured", "cool fresh leaves quickly; dry seed umbels in shade and store dry seed"),
+        "Mint": ("healthy, disease-free stolons or rooted runners of the selected mint type", "tender leaves and leafy tops", "moist, fertile, well-drained beds with organic matter and containment against runner spread", "maintain steady moisture for leaf regrowth; avoid waterlogging", "apply compost and split soil-test-based nitrogen after cuts; replenish nutrients for repeated harvest", "rust, leaf spot, wilt, aphids and mite damage", "cut leafy tops before flowering and leave sufficient nodes for regrowth", "keep leaves shaded, cool and ventilated; process or market promptly"),
+        "Banana": ("true-to-type, disease-free tissue-culture plants or sword suckers", "bunches of hands and fingers", "deep, fertile, well-drained pits/rows with wind protection and drainage channels", "maintain regular moisture through bunch development; use mulch/drip where suitable and avoid waterlogging", "apply split nutrients based on soil/leaf analysis, plant age and bunch load; emphasize potassium balance", "sigatoka leaf spots, panama wilt, pseudostem weevil, nematodes and bunch development", "harvest bunch at the locally accepted finger fullness/angularity stage for transport distance", "dehand/grade hygienically, avoid impact and ripen/store at crop-appropriate temperature"),
+        "Mango": ("grafted, true-to-type, disease-free nursery plants", "mature fruits", "deep, well-drained orchard soil with planned spacing, pits, windbreaks and drainage", "irrigate young trees for establishment and bearing trees during critical fruit development; avoid waterlogging", "use soil and leaf analysis to plan nutrients by tree age and crop load; apply organic matter in basin", "mango hopper, fruit fly, powdery mildew, anthracnose, dieback and fruit set", "harvest at physiological maturity with stalk attached; avoid latex staining and drops", "de-sap, grade and pack in ventilated crates; keep fruit shaded and handle gently"),
+        "Papaya": ("healthy, true-to-type nursery seedlings of a locally recommended sex type/variety", "mature papaya fruits", "deep, fertile, very well-drained field with raised planting positions where drainage is slow", "provide frequent but controlled irrigation; papaya is highly sensitive to waterlogging and root injury", "use soil/leaf-test-guided split nutrition matched to plant age and fruit load; monitor potassium, calcium and boron status", "ringspot virus symptoms, anthracnose, foot/root rot, mealybug, mites and fruit fly", "harvest at first colour break for distant markets or fuller colour for local sale; retain stalk carefully", "shade, grade and use padded ventilated crates; avoid chilling and bruising"),
+        "Guava": ("grafted or air-layered, true-to-type disease-free nursery plants", "mature guava fruits", "well-drained orchard site with pits, basin layout and pruning access", "irrigate young plants regularly and bearing trees during fruit development; avoid standing water", "apply organic manure and soil-test/leaf-analysis-based nutrients adjusted to pruning and crop load", "fruit fly, wilt, anthracnose, bark-eating caterpillar and fruit cracking", "harvest when fruit reaches full size and changes to cultivar-specific mature-green/light-yellow colour", "handle gently, grade and use ventilated crates; cool promptly for longer transport"),
+        "Citrus": ("certified, disease-free budded plants on locally suitable rootstock", "mature citrus fruits", "well-drained orchard soil with contour layout on slopes, basins and drainage", "maintain even moisture during flowering and fruit enlargement; avoid waterlogging and severe swings", "base nutrients on leaf/soil analysis; monitor zinc, iron, magnesium and nitrogen status", "citrus canker, greening symptoms, gummosis, leaf miner, psylla and fruit fly", "harvest when fruit reaches cultivar-specific colour, juice and maturity standards; do not pull fruit", "clip with short stalk, avoid rind injury and grade/store in ventilated cool conditions"),
+        "Lemon": ("certified, disease-free budded lemon plants on suitable rootstock", "mature lemons", "well-drained orchard site with raised basins where needed and drainage channels", "maintain regular moisture during flowering and fruit set; avoid waterlogging", "use soil/leaf-test-guided split nutrients and monitor zinc, iron and magnesium deficiencies", "citrus canker, leaf miner, gummosis, psylla, mites and fruit fly", "pick mature fruits at market size and suitable juice/colour stage using clippers", "shade, grade and ventilate; avoid piling and rind injury"),
+        "Pomegranate": ("true-to-type, disease-free rooted cuttings or nursery plants", "mature arils enclosed in fruits", "well-drained orchard soil with planned bahar regulation, pruning and drainage", "manage irrigation consistently during fruit growth; avoid abrupt moisture changes that cause cracking", "base nutrients on soil/leaf tests and crop load; maintain balanced potassium and calcium", "bacterial blight, wilt, fruit borer, thrips, mites and fruit cracking", "harvest when fruit develops cultivar-specific colour and maturity; use clippers, not pulling", "grade intact fruits, avoid impact and store in cool ventilated conditions"),
+        "Grapes": ("certified, true-to-type rooted cuttings or grafted vines", "bunches of berries", "deep, well-drained vineyard soil with trellis, row orientation and drainage planned", "schedule drip irrigation by vine stage and soil moisture; avoid excess water near ripening", "use soil/leaf/petiole analysis to guide nutrients and avoid excess nitrogen during fruiting", "downy mildew, powdery mildew, anthracnose, mealybug, thrips and bunch rot", "harvest when soluble solids, acidity, colour and berry firmness meet market specifications", "harvest in cool hours, retain bloom, pack gently and maintain cultivar-appropriate cold chain"),
+        "Apple": ("certified, virus-tested grafted plants on suitable rootstock with compatible pollinizers", "mature apples", "well-drained orchard site with suitable chilling, slope, drainage and pollinizer layout", "irrigate during dry spells and fruit enlargement; avoid waterlogging and moisture stress", "use soil/leaf analysis and crop-load estimates to plan nutrients; avoid excess nitrogen late in season", "apple scab, powdery mildew, fire blight, woolly aphid, codling moth and bitter pit", "pick at cultivar-specific starch/firmness/colour maturity; avoid stripping stems or bruising", "pre-cool, grade and store under cultivar-appropriate controlled atmosphere/cold conditions"),
+        "Pear": ("certified grafted pear plants with compatible pollinizer cultivars", "mature pears", "well-drained orchard site with appropriate chilling, pollination plan and drainage", "maintain even moisture during fruit enlargement; avoid waterlogging", "base nutrients on soil and leaf analysis; balance nitrogen, potassium and calcium", "pear psylla, fire blight, scab, codling moth and fruit russeting", "harvest at cultivar-specific maturity using firmness and ease of separation rather than softness alone", "handle carefully, pre-cool and store at cultivar-appropriate temperature"),
+        "Peach": ("certified grafted peach plants on locally suitable rootstock", "mature peaches", "well-drained orchard site with suitable chilling, sun exposure and pruning access", "irrigate during fruit enlargement and avoid water stress; ensure drainage during rains", "use soil/leaf analysis to balance NPK; avoid excess nitrogen that delays fruit colour and firmness", "peach leaf curl, brown rot, shot hole, aphids, fruit fly and borer damage", "pick at cultivar-specific ground-colour and firmness for the intended market", "shade, cushion and cool quickly; avoid pressure and bruising"),
+        "Plum": ("certified grafted plum plants with compatible pollinizer if required", "mature plums", "well-drained orchard soil with suitable chilling and planned pollination", "maintain even moisture during fruit enlargement; avoid waterlogging", "use soil/leaf-test-guided nutrients and balance crop load with pruning", "brown rot, plum aphid, fruit moth, bacterial canker and fruit cracking", "harvest at cultivar-specific colour and firmness; use repeated picks if ripening is uneven", "handle gently, cool promptly and avoid stacking pressure"),
+        "Litchi": ("true-to-type air-layered or grafted litchi plants from reliable nurseries", "clusters of mature litchi fruits", "deep, well-drained orchard soil with wind protection and reliable irrigation access", "maintain moisture during fruit growth and avoid dry-hot stress; avoid waterlogging", "use soil/leaf-test-guided nutrients after harvest and maintain organic mulch", "fruit cracking, litchi mite, fruit borer, leaf blight and sunburn", "harvest whole clusters when pericarp reaches cultivar colour and fruits are full-sized", "keep clusters shaded, pre-cool quickly and maintain high humidity without wetting"),
+        "Pineapple": ("healthy, uniform suckers, slips or approved tissue-culture plants", "multiple fruits (syncarps)", "well-drained raised beds or ridges with organic matter and suitable planting density", "maintain moisture during establishment and fruit development; avoid standing water", "use soil-test-based split nutrients and potassium emphasis; adjust to plant size and forcing schedule", "mealybug wilt, heart rot, fusariosis, mealybugs and sunburn", "harvest at cultivar-specific eye flattening and colour stage for the transport market", "handle crowns/fruits gently, shade and ventilate; avoid chilling injury"),
+        "Jackfruit": ("grafted, true-to-type nursery plants", "large composite fruits", "deep, well-drained orchard soil with ample canopy space and strong fruit-bearing branches", "water young trees through establishment and bearing trees during fruit development; drain excess rain", "apply organic matter and soil/leaf-test-guided nutrients according to tree age and fruit load", "fruit and stem borer, dieback, root rot, fruit rot and branch breakage", "harvest when spines flatten, fruit emits characteristic aroma and tapping gives a mature sound", "support large fruits during handling, clean latex safely and market/process promptly"),
+        "Coconut": ("healthy, selected seedlings from high-yielding mother palms", "mature nuts or tender nuts", "deep, well-drained site with adequate rooting depth, wind protection and basin layout", "provide regular irrigation in dry periods and mulch basins; ensure drainage in monsoon", "use soil-test-based palm nutrition, organic recycling and balanced potassium/magnesium", "rhinoceros beetle, red palm weevil, eriophyid mite, bud rot and leaf nutrient symptoms", "harvest at the intended tender-nut age or mature-nut stage using safe climbing practice", "keep mature nuts dry and ventilated; handle tender nuts carefully and market promptly"),
+        "Arecanut": ("healthy, selected arecanut seedlings from reliable gardens", "mature or tender nuts", "deep, fertile, well-drained soil with shade management and drainage channels", "maintain steady moisture with mulch/drip where possible; avoid waterlogging", "apply palm-specific soil-test-based nutrition and organic matter; monitor magnesium and potassium", "koleroga fruit rot, spindle bug, mite, root grubs and crown health", "harvest bunches at the locally required maturity stage and avoid damaging the palm", "process/cure nuts by the intended market method and dry thoroughly before storage"),
+        "Cashew": ("grafted cashew plants of recommended varieties", "cashew nuts and apples", "well-drained lateritic or light-textured orchard land with contour conservation on slopes", "irrigate young plants and during severe dry spells; avoid waterlogging", "use soil-test-based nutrients and organic mulch; account for nut yield and tree age", "tea mosquito bug, stem/root borer, anthracnose, dieback and nut development", "collect fallen mature nuts regularly, separate apples/nuts and avoid mixing damp material", "dry raw nuts safely and uniformly; store in dry ventilated bags away from moisture"),
+        "Coffee": ("healthy, true-to-type coffee seedlings from certified nurseries", "ripe coffee cherries", "well-drained shaded slopes with contour drains, mulch and erosion control", "maintain shade and soil moisture; provide irrigation during prolonged dry spells where feasible", "base nutrients on soil/leaf analysis and crop load; recycle pulp/compost safely", "coffee berry borer, white stem borer, leaf rust, berry disease and shade imbalance", "selectively pick ripe cherries and avoid harvesting excessive green or overripe berries", "process promptly after picking and dry parchment/cherries uniformly to safe moisture"),
+        "Tea": ("certified clonal plants or seed-raised planting material recommended for the zone", "tender shoots (bud and young leaves)", "deep acidic, organic-rich, well-drained soil; contour rows and erosion control on slopes", "maintain soil moisture with mulch and drainage; avoid both drought stress and waterlogging", "use soil and leaf analysis to guide split nutrition by bush age and plucking yield", "blister blight, grey blight, red spider mite, mosquito bug and shoot vigour", "pluck the locally specified bud-and-leaf standard at regular rounds without coarse leaf", "keep green leaf loose, shaded and ventilated and transport promptly for processing"),
+        "Turmeric": ("healthy, disease-free mother rhizomes or seed rhizomes", "mature rhizomes", "well-drained raised beds or ridges enriched with well-decomposed organic matter", "maintain moisture during sprouting and rhizome bulking; mulch and drain excess water", "use soil-test-based NPK and organic matter; avoid fresh manure and excess nitrogen", "rhizome rot, leaf blotch, shoot borer and rhizome development", "harvest when leaves yellow and dry and rhizomes mature; cure/boil only by the chosen processing standard", "clean and dry cured rhizomes thoroughly to safe moisture before dry storage"),
+        "Ginger": ("healthy, disease-free seed rhizomes with viable buds", "mature rhizomes", "raised beds with loose organic-rich soil and excellent drainage", "maintain even moisture and mulch; prevent waterlogging, especially during monsoon", "use well-decomposed compost and soil-test-based nutrients; avoid excessive nitrogen", "soft rot, bacterial wilt, leaf spot, shoot borer and rhizome health", "harvest green ginger at the desired immature stage or mature ginger after foliage yellows", "wash only when required, cure/dry mature rhizomes carefully and store in ventilated conditions"),
+        "Black pepper": ("healthy rooted cuttings from high-yielding, disease-free mother vines", "dried or fresh pepper berries", "well-drained humid tropical site with live standards/support trees and drainage", "maintain humid root-zone conditions with mulch but prevent stagnant water around vines", "use organic matter and soil/leaf-test-guided split nutrients according to vine age and bearing", "quick wilt, slow decline, pollu beetle, scale insects and spike formation", "harvest spikes when one or two berries begin changing colour; process for black/white pepper as intended", "dry berries uniformly on clean surfaces and store airtight in a dry place"),
+        "Cardamom": ("healthy, disease-free suckers or nursery seedlings of the selected cultivar", "mature capsules", "shaded, humus-rich, well-drained hill soil with contour drains", "maintain humid shade and regular moisture; drain excess monsoon water", "apply organic mulch and soil-test-based split nutrients around clumps", "azhukal capsule rot, thrips, shoot/capsule borer and clump vigour", "pick mature capsules at the correct green stage in repeated rounds before splitting", "wash/process and dry capsules promptly to the specified moisture and colour standard"),
+        "Clove": ("healthy grafted or seedling clove plants from reliable nurseries", "unopened flower buds", "deep, humus-rich, well-drained humid tropical site with shade for young trees", "water young trees during dry periods and maintain mulch; avoid waterlogging", "apply organic manure and soil-test-guided nutrients around the canopy drip line", "leaf spot, dieback, stem borer and flower-bud development", "harvest fully developed unopened buds before petals open; avoid immature small buds", "separate buds and dry slowly under clean conditions to preserve colour and aroma"),
+        "Cocoa": ("healthy grafted or seedling cocoa plants from recommended clones", "mature pods and wet beans", "deep, fertile, well-drained shaded site with wind protection and drainage", "maintain even moisture under regulated shade; avoid waterlogging", "recycle cocoa pod husks safely and use soil/leaf-test-based nutrients by tree age and pod load", "black pod disease, vascular streak dieback, mirids, stem canker and pod maturity", "harvest mature pods at cultivar colour change and sound; avoid damaging flower cushions", "break pods promptly, ferment beans correctly and dry uniformly to safe moisture"),
+        "Rubber": ("certified budded stumps or polybag plants of recommended clones", "latex from tapped mature trees", "deep, well-drained plantation site with contour conservation and planned tapping paths", "establish with monsoon moisture and maintain drainage; avoid root-zone waterlogging", "use soil/leaf-analysis-guided nutrients during immature growth and maintain ground cover", "abnormal leaf fall, powdery mildew, tapping panel dryness, root disease and bark condition", "begin tapping only at locally specified girth/bark maturity and follow correct tapping panel practice", "keep latex/field coagulum clean and process promptly; protect dry rubber from heat and contamination"),
+        "Aloe vera": ("healthy suckers or disease-free planting material of a known aloe type", "mature fleshy leaves", "raised beds or ridges with sandy, very well-drained soil", "use sparse irrigation after establishment; prevent standing water and root rot", "use modest soil-test-based nutrients and mature compost; avoid heavy nitrogen", "leaf spot, basal rot, mealybugs, scale and leaf gel quality", "harvest mature outer leaves without damaging the central growing point", "process leaves quickly after cutting; keep gel clean and protected from heat"),
+        "Marigold": ("healthy, hardened seedlings or true-to-type seed of the selected marigold type", "flower heads", "well-drained beds with fine tilth, sunlight and airflow", "maintain moisture during establishment and bud formation; avoid waterlogging", "use soil-test-based balanced nutrients; avoid excessive nitrogen that reduces flowering", "bud initiation, flower size, leaf spot, powdery mildew, aphids and mites", "pick fully developed fresh blooms at the stage required by the garland/loose-flower market", "keep flowers shaded, cool and ventilated; market quickly"),
+        "Rose": ("healthy, true-to-type budded plants or rooted cuttings from a reliable nursery", "flower buds and blooms", "well-drained fertile beds with sunlight, air movement and planned pruning access", "irrigate at root zone and maintain even moisture; avoid wet foliage and waterlogging", "apply compost and soil-test-based nutrients in split doses after pruning and during flush", "black spot, powdery mildew, dieback, aphids, thrips and mite damage", "cut at the cultivar-specific bud stage with clean sharp secateurs and retain healthy nodes", "hydrate and pre-cool stems promptly; grade, sleeve and maintain cold chain"),
+        "Jasmine": ("healthy rooted cuttings or layers of a locally recommended jasmine cultivar", "flower buds", "well-drained fertile beds with sunlight and access for repeated pruning/picking", "maintain regular moisture during bud formation; avoid waterlogging", "use organic manure and soil-test-based split nutrients after pruning and during flush", "bud worm, blossom midge, leaf webber, leaf spot and shoot dieback", "pick mature unopened buds in cool hours at the stage required by the buyer", "keep buds shaded, cool and ventilated; dispatch promptly"),
+        "Tobacco": ("healthy, disease-free nursery seedlings of a legally permitted locally recommended type", "mature leaves", "well-drained field with rotation and soil suitability matched to the tobacco type", "avoid waterlogging and manage irrigation to the leaf-quality objective and local schedule", "base nutrients on soil test and leaf-quality requirements; avoid excess nitrogen late in growth", "tobacco caterpillar, aphids, leaf curl, black shank and leaf maturity", "harvest leaves by priming or stalk cutting at the locally specified maturity and colour", "cure leaves using the type-specific controlled curing method; store dry cured leaf safely"),
+        "Fodder maize": ("certified seed of a locally recommended fodder maize hybrid", "whole green plant or silage crop", "well-drained field with fine seedbed and rows suitable for mechanized cutting", "maintain moisture during rapid vegetative growth; avoid waterlogging", "use soil-test-based nutrients with split nitrogen after establishment and before rapid growth", "plant stand, fall armyworm, leaf blight, lodging and harvest-stage dry matter", "cut at the locally recommended milk-line/whole-plant dry-matter stage for silage or green chop", "chop and feed fresh or ensile promptly in an airtight, compacted silo"),
+        "Lucerne": ("certified seed of a locally adapted, wilt-resistant lucerne variety", "leafy forage", "well-drained, level seedbed with firm surface and suitable pH for nodulation", "irrigate after cuts and during regrowth; avoid waterlogging and poor drainage", "inoculate seed with suitable Rhizobium where recommended and use soil-test-based phosphorus, potassium and sulphur", "crown/root rot, aphids, leaf spot, stand gaps and regrowth after cutting", "cut at early bloom or locally recommended leaf-to-stem balance; leave adequate stubble for regrowth", "cure hay rapidly without leaf shatter or ensile at suitable moisture"),
+        "Berseem": ("certified seed of a locally adapted berseem variety", "leafy forage", "fine, level, moist seedbed with good drainage and firm seed-soil contact", "maintain adequate moisture between repeated cuts; avoid prolonged stagnant water", "use soil-test-based phosphorus and potassium and Rhizobium inoculation where recommended", "root rot, stem rot, aphids, leaf spots and stand density", "take first cut at recommended establishment stage and later cuts before excessive flowering", "feed fresh or wilt to suitable moisture before ensiling; keep hay dry"),
+        "Napier grass": ("healthy, disease-free stem cuttings or rooted slips of a recommended Napier hybrid", "whole leafy forage stems", "well-drained rows or pits with adequate organic matter and access for repeated cutting", "irrigate after planting and after cuts; maintain moisture for regrowth but drain excess water", "apply compost and soil-test-based split nitrogen after each cut, matched to forage removal", "smut, leaf blight, stem borer, stand gaps and regrowth vigour", "cut at the recommended leafy stage before stems become too fibrous; retain basal stubble", "chop and feed fresh or ensile promptly; do not store wet cut forage in heaps"),
+        "Quinoa": ("certified, true-to-type seed of a locally adapted quinoa variety", "grain panicles and seed", "fine, well-drained seedbed with shallow uniform sowing", "establish with adequate moisture then avoid excessive irrigation; prevent waterlogging", "use soil-test-based modest nitrogen and balanced phosphorus/potassium; avoid excess nitrogen", "downy mildew, damping-off, aphids, birds and panicle maturity", "harvest when panicles dry and seed is hard; avoid shattering and bird losses", "dry seed thoroughly, clean/sort and store moisture-proof; wash/process to remove saponins as required"),
+        "Amaranth grain": ("certified seed of a locally adapted grain amaranth variety", "dry seed panicles", "fine, level, well-drained seedbed with shallow sowing and weed-free establishment", "maintain moisture during establishment; avoid excess irrigation during grain maturation", "use soil-test-based balanced nutrients and avoid excess nitrogen that delays seed maturity", "damping-off, leaf spots, stem borers, birds and panicle fill", "cut panicles when seed is mature and begins shedding; dry before threshing", "dry and clean seed thoroughly; store in moisture-proof, pest-safe containers"),
+        "Moringa": ("healthy seed, rooted cuttings or true-to-type nursery plants", "tender leaves, pods and flowers", "well-drained field with spacing/pruning access and drainage around planting points", "establish with regular moisture then irrigate during dry spells; avoid waterlogging", "use compost and soil-test-guided nutrients after pruning and according to leaf/pod harvest intensity", "budworm, pod fly, leaf caterpillars, root rot and repeated shoot regrowth", "harvest tender leaves/shoots regularly or pods while green and tender for vegetable use", "keep leaves shaded and cool; handle pods gently and market quickly"),
+        "Drumstick": ("healthy, true-to-type seedling or vegetatively propagated planting material", "tender pods and leaves", "well-drained planting pits or ridges with room for canopy management", "water young plants during establishment; mature trees tolerate dry periods but need moisture for pod set", "incorporate compost and apply soil-test-based nutrients after pruning and during flowering", "pod fly, hairy caterpillars, leaf spots, stem rot and flowering flush", "pick pods while tender and before fibrous ridges develop; prune for accessible new growth", "shade and ventilate pods; process or market leafy produce promptly"),
+        "Strawberry": ("healthy, disease-free runners or plug plants of a locally adapted cultivar", "ripe berries", "raised beds with well-drained soil, mulch and clean planting material", "use drip irrigation to keep root zone moist while keeping leaves/fruits dry", "base nutrients on soil test and crop stage; avoid excess nitrogen during fruiting", "grey mould, powdery mildew, anthracnose crown rot, mites, thrips and fruit firmness", "pick fully coloured firm berries with calyx in cool hours and handle minimally", "pre-cool immediately, use shallow punnets and maintain an uninterrupted cold chain"),
+        "Dragon fruit": ("healthy disease-free stem cuttings from identified productive mother plants", "mature dragon-fruit berries", "well-drained raised planting beds with strong posts/trellis and drainage", "irrigate during establishment and flowering/fruit growth; avoid waterlogging and excess moisture", "use compost and soil-test-based split nutrients; avoid excess nitrogen that favours vegetative growth", "stem canker, anthracnose, fruit rot, ants, mealybugs and flowering synchrony", "harvest when skin colour is fully developed and scales begin changing as per cultivar", "clip carefully, shade and grade; avoid compression and chilling outside cultivar tolerance"),
+        "Avocado": ("grafted, true-to-type plants on rootstock suited to local soil and climate", "mature avocado fruits", "deep, highly well-drained soil with raised planting positions and strict drainage", "maintain steady moisture but never waterlog; shallow roots are sensitive to drought and saturation", "use soil/leaf analysis to manage nitrogen, potassium, zinc and boron; mulch without touching trunk", "root rot (Phytophthora), anthracnose, fruit borers, sunburn and fruit maturity", "harvest at cultivar-specific dry matter maturity; fruit may ripen after picking", "handle gently, avoid skin injury and store/transport at cultivar-appropriate cool temperatures"),
+        "Moth beans": ("certified seed of a locally adapted drought-tolerant moth bean variety", "pods and seed", "light, well-drained sandy soil with a firm seedbed and moisture-conserving layout", "rely on timely monsoon moisture; avoid excess irrigation and waterlogging", "use soil-test-based modest nutrients and seed inoculation where locally recommended", "yellow mosaic, leaf webber, pod borer, aphids and moisture stress", "harvest when most pods turn brown; pick in rounds to limit shattering", "dry pods before threshing and store seed at safe moisture in pest-proof containers"),
+        "Orange": ("certified, disease-free budded plants on locally suitable citrus rootstock", "mature orange fruits", "well-drained orchard soil with planned spacing, drainage and wind protection", "maintain even moisture through flowering and fruit enlargement; avoid waterlogging", "use leaf/soil analysis to guide NPK and micronutrients; monitor zinc, iron and magnesium", "citrus greening, canker, scab, fruit fly, psylla, leaf miner and gummosis", "harvest when cultivar-specific colour, juice and maturity standards are met; clip fruit", "grade gently, avoid rind injury and store/transport in ventilated cool conditions"),
+    }
 
-if crop_market_data.empty:
-    # No crop-specific mandi history was found. Generate clearly labelled
-    # synthetic historical prices using local mandi rates as a reference.
-    # These values are artificial estimates, not observed prices for this crop.
-    synthetic_market_rows = []
-    synthetic_dates = pd.date_range(
-        end=pd.Timestamp(date.today()).normalize(),
-        periods=156,
-        freq="W"
+    def build_crop_specific_guidance(crop_name, base_guide, crop_family):
+        if crop_name == 'Rice':
+            traits = CROP_PRACTICE_TRAITS['Rice']
+        elif crop_name == 'Wheat':
+            traits = CROP_PRACTICE_TRAITS['Wheat']
+        elif crop_name == 'Maize':
+            traits = CROP_PRACTICE_TRAITS['Maize']
+        elif crop_name == 'Sorghum':
+            traits = CROP_PRACTICE_TRAITS['Sorghum']
+        elif crop_name == 'Pearl millet':
+            traits = CROP_PRACTICE_TRAITS['Pearl millet']
+        elif crop_name == 'Finger millet':
+            traits = CROP_PRACTICE_TRAITS['Finger millet']
+        elif crop_name == 'Barley':
+            traits = CROP_PRACTICE_TRAITS['Barley']
+        elif crop_name == 'Oats':
+            traits = CROP_PRACTICE_TRAITS['Oats']
+        elif crop_name == 'Chickpea':
+            traits = CROP_PRACTICE_TRAITS['Chickpea']
+        elif crop_name == 'Pigeon pea':
+            traits = CROP_PRACTICE_TRAITS['Pigeon pea']
+        elif crop_name == 'Green gram':
+            traits = CROP_PRACTICE_TRAITS['Green gram']
+        elif crop_name == 'Black gram':
+            traits = CROP_PRACTICE_TRAITS['Black gram']
+        elif crop_name == 'Lentil':
+            traits = CROP_PRACTICE_TRAITS['Lentil']
+        elif crop_name == 'Field pea':
+            traits = CROP_PRACTICE_TRAITS['Field pea']
+        elif crop_name == 'Kidney bean':
+            traits = CROP_PRACTICE_TRAITS['Kidney bean']
+        elif crop_name == 'Soybean':
+            traits = CROP_PRACTICE_TRAITS['Soybean']
+        elif crop_name == 'Groundnut':
+            traits = CROP_PRACTICE_TRAITS['Groundnut']
+        elif crop_name == 'Mustard':
+            traits = CROP_PRACTICE_TRAITS['Mustard']
+        elif crop_name == 'Sesame':
+            traits = CROP_PRACTICE_TRAITS['Sesame']
+        elif crop_name == 'Sunflower':
+            traits = CROP_PRACTICE_TRAITS['Sunflower']
+        elif crop_name == 'Safflower':
+            traits = CROP_PRACTICE_TRAITS['Safflower']
+        elif crop_name == 'Linseed':
+            traits = CROP_PRACTICE_TRAITS['Linseed']
+        elif crop_name == 'Castor':
+            traits = CROP_PRACTICE_TRAITS['Castor']
+        elif crop_name == 'Cotton':
+            traits = CROP_PRACTICE_TRAITS['Cotton']
+        elif crop_name == 'Jute':
+            traits = CROP_PRACTICE_TRAITS['Jute']
+        elif crop_name == 'Sugarcane':
+            traits = CROP_PRACTICE_TRAITS['Sugarcane']
+        elif crop_name == 'Potato':
+            traits = CROP_PRACTICE_TRAITS['Potato']
+        elif crop_name == 'Sweet potato':
+            traits = CROP_PRACTICE_TRAITS['Sweet potato']
+        elif crop_name == 'Cassava':
+            traits = CROP_PRACTICE_TRAITS['Cassava']
+        elif crop_name == 'Onion':
+            traits = CROP_PRACTICE_TRAITS['Onion']
+        elif crop_name == 'Garlic':
+            traits = CROP_PRACTICE_TRAITS['Garlic']
+        elif crop_name == 'Tomato':
+            traits = CROP_PRACTICE_TRAITS['Tomato']
+        elif crop_name == 'Brinjal':
+            traits = CROP_PRACTICE_TRAITS['Brinjal']
+        elif crop_name == 'Chilli':
+            traits = CROP_PRACTICE_TRAITS['Chilli']
+        elif crop_name == 'Capsicum':
+            traits = CROP_PRACTICE_TRAITS['Capsicum']
+        elif crop_name == 'Cabbage':
+            traits = CROP_PRACTICE_TRAITS['Cabbage']
+        elif crop_name == 'Cauliflower':
+            traits = CROP_PRACTICE_TRAITS['Cauliflower']
+        elif crop_name == 'Broccoli':
+            traits = CROP_PRACTICE_TRAITS['Broccoli']
+        elif crop_name == 'Okra':
+            traits = CROP_PRACTICE_TRAITS['Okra']
+        elif crop_name == 'Cucumber':
+            traits = CROP_PRACTICE_TRAITS['Cucumber']
+        elif crop_name == 'Pumpkin':
+            traits = CROP_PRACTICE_TRAITS['Pumpkin']
+        elif crop_name == 'Bottle gourd':
+            traits = CROP_PRACTICE_TRAITS['Bottle gourd']
+        elif crop_name == 'Bitter gourd':
+            traits = CROP_PRACTICE_TRAITS['Bitter gourd']
+        elif crop_name == 'Ridge gourd':
+            traits = CROP_PRACTICE_TRAITS['Ridge gourd']
+        elif crop_name == 'Watermelon':
+            traits = CROP_PRACTICE_TRAITS['Watermelon']
+        elif crop_name == 'Muskmelon':
+            traits = CROP_PRACTICE_TRAITS['Muskmelon']
+        elif crop_name == 'Carrot':
+            traits = CROP_PRACTICE_TRAITS['Carrot']
+        elif crop_name == 'Radish':
+            traits = CROP_PRACTICE_TRAITS['Radish']
+        elif crop_name == 'Beetroot':
+            traits = CROP_PRACTICE_TRAITS['Beetroot']
+        elif crop_name == 'Turnip':
+            traits = CROP_PRACTICE_TRAITS['Turnip']
+        elif crop_name == 'Spinach':
+            traits = CROP_PRACTICE_TRAITS['Spinach']
+        elif crop_name == 'Amaranth':
+            traits = CROP_PRACTICE_TRAITS['Amaranth']
+        elif crop_name == 'Fenugreek':
+            traits = CROP_PRACTICE_TRAITS['Fenugreek']
+        elif crop_name == 'Coriander':
+            traits = CROP_PRACTICE_TRAITS['Coriander']
+        elif crop_name == 'Mint':
+            traits = CROP_PRACTICE_TRAITS['Mint']
+        elif crop_name == 'Banana':
+            traits = CROP_PRACTICE_TRAITS['Banana']
+        elif crop_name == 'Mango':
+            traits = CROP_PRACTICE_TRAITS['Mango']
+        elif crop_name == 'Papaya':
+            traits = CROP_PRACTICE_TRAITS['Papaya']
+        elif crop_name == 'Guava':
+            traits = CROP_PRACTICE_TRAITS['Guava']
+        elif crop_name == 'Citrus':
+            traits = CROP_PRACTICE_TRAITS['Citrus']
+        elif crop_name == 'Lemon':
+            traits = CROP_PRACTICE_TRAITS['Lemon']
+        elif crop_name == 'Pomegranate':
+            traits = CROP_PRACTICE_TRAITS['Pomegranate']
+        elif crop_name == 'Grapes':
+            traits = CROP_PRACTICE_TRAITS['Grapes']
+        elif crop_name == 'Apple':
+            traits = CROP_PRACTICE_TRAITS['Apple']
+        elif crop_name == 'Pear':
+            traits = CROP_PRACTICE_TRAITS['Pear']
+        elif crop_name == 'Peach':
+            traits = CROP_PRACTICE_TRAITS['Peach']
+        elif crop_name == 'Plum':
+            traits = CROP_PRACTICE_TRAITS['Plum']
+        elif crop_name == 'Litchi':
+            traits = CROP_PRACTICE_TRAITS['Litchi']
+        elif crop_name == 'Pineapple':
+            traits = CROP_PRACTICE_TRAITS['Pineapple']
+        elif crop_name == 'Jackfruit':
+            traits = CROP_PRACTICE_TRAITS['Jackfruit']
+        elif crop_name == 'Coconut':
+            traits = CROP_PRACTICE_TRAITS['Coconut']
+        elif crop_name == 'Arecanut':
+            traits = CROP_PRACTICE_TRAITS['Arecanut']
+        elif crop_name == 'Cashew':
+            traits = CROP_PRACTICE_TRAITS['Cashew']
+        elif crop_name == 'Coffee':
+            traits = CROP_PRACTICE_TRAITS['Coffee']
+        elif crop_name == 'Tea':
+            traits = CROP_PRACTICE_TRAITS['Tea']
+        elif crop_name == 'Turmeric':
+            traits = CROP_PRACTICE_TRAITS['Turmeric']
+        elif crop_name == 'Ginger':
+            traits = CROP_PRACTICE_TRAITS['Ginger']
+        elif crop_name == 'Black pepper':
+            traits = CROP_PRACTICE_TRAITS['Black pepper']
+        elif crop_name == 'Cardamom':
+            traits = CROP_PRACTICE_TRAITS['Cardamom']
+        elif crop_name == 'Clove':
+            traits = CROP_PRACTICE_TRAITS['Clove']
+        elif crop_name == 'Cocoa':
+            traits = CROP_PRACTICE_TRAITS['Cocoa']
+        elif crop_name == 'Rubber':
+            traits = CROP_PRACTICE_TRAITS['Rubber']
+        elif crop_name == 'Aloe vera':
+            traits = CROP_PRACTICE_TRAITS['Aloe vera']
+        elif crop_name == 'Marigold':
+            traits = CROP_PRACTICE_TRAITS['Marigold']
+        elif crop_name == 'Rose':
+            traits = CROP_PRACTICE_TRAITS['Rose']
+        elif crop_name == 'Jasmine':
+            traits = CROP_PRACTICE_TRAITS['Jasmine']
+        elif crop_name == 'Tobacco':
+            traits = CROP_PRACTICE_TRAITS['Tobacco']
+        elif crop_name == 'Fodder maize':
+            traits = CROP_PRACTICE_TRAITS['Fodder maize']
+        elif crop_name == 'Lucerne':
+            traits = CROP_PRACTICE_TRAITS['Lucerne']
+        elif crop_name == 'Berseem':
+            traits = CROP_PRACTICE_TRAITS['Berseem']
+        elif crop_name == 'Napier grass':
+            traits = CROP_PRACTICE_TRAITS['Napier grass']
+        elif crop_name == 'Quinoa':
+            traits = CROP_PRACTICE_TRAITS['Quinoa']
+        elif crop_name == 'Amaranth grain':
+            traits = CROP_PRACTICE_TRAITS['Amaranth grain']
+        elif crop_name == 'Moringa':
+            traits = CROP_PRACTICE_TRAITS['Moringa']
+        elif crop_name == 'Drumstick':
+            traits = CROP_PRACTICE_TRAITS['Drumstick']
+        elif crop_name == 'Strawberry':
+            traits = CROP_PRACTICE_TRAITS['Strawberry']
+        elif crop_name == 'Dragon fruit':
+            traits = CROP_PRACTICE_TRAITS['Dragon fruit']
+        elif crop_name == 'Avocado':
+            traits = CROP_PRACTICE_TRAITS['Avocado']
+        elif crop_name == 'Moth beans':
+            traits = CROP_PRACTICE_TRAITS['Moth beans']
+        elif crop_name == 'Orange':
+            traits = CROP_PRACTICE_TRAITS['Orange']
+        else:
+            raise ValueError(f"No crop-specific practice profile defined for {crop_name!r}")
+        planting, harvest_organ, field, water, nutrients, scouting, maturity, storage = traits
+        diseases = str(base_guide.get("common_diseases", "")).strip()
+        pests = str(base_guide.get("common_pests", "")).strip()
+        disease_text = diseases if diseases else (
+            f"For {crop_name}, inspect the crop for local leaf, stem, root and harvested-{harvest_organ} diseases. "
+            "Photograph early symptoms, compare affected and healthy plants, and obtain diagnosis from the local KVK before treatment."
+        )
+        pest_text = pests if pests else (
+            f"For {crop_name}, inspect growing points, leaf undersides, stems and {harvest_organ} for feeding injury, eggs, larvae, honeydew or frass. "
+            "Identify the pest and check local economic-threshold advice before intervention."
+        )
+        base_guide["land_preparation"] = (
+            f"Prepare the field for {crop_name} using {field}. Remove weeds and diseased residues, "
+            f"provide suitable drainage, and establish the crop with {planting}. "
+            "Check soil pH, salinity and drainage before planting. Correct limitations only "
+            "at soil-test-based rates recommended by the local KVK or State Agricultural University."
+        )
+        base_guide["fertilizer_application"] = (
+            f"For {crop_name}, test the soil and account for previous manure and fertilizer use. "
+            f"Nutrient focus: {nutrients}. Incorporate well-decomposed compost where suitable. "
+            "Apply basal nutrients and split mobile nutrients at locally recommended crop stages. "
+            "Keep fertilizer away from seed and roots. Avoid blanket doses."
+        )
+        base_guide["nutrient_guidance"] = (
+            f"Manage {crop_name} nutrition according to soil-test results, crop stage and removal in {harvest_organ}. "
+            f"Priority: {nutrients}. Watch older and younger leaves for deficiency patterns. "
+            "Confirm suspected deficiencies with soil or leaf analysis before applying micronutrients. "
+            "Avoid excess nitrogen, especially near maturity."
+        )
+        base_guide["monitoring"] = (
+            f"Inspect {crop_name} weekly, increasing checks during establishment, flowering and {harvest_organ} development. "
+            f"Check for: {scouting}. Walk a repeatable W-shaped route, inspect several field areas, "
+            "record affected plants and crop stage, and mark hotspots for follow-up. Also check "
+            "irrigation, drainage, weeds and nutrient symptoms."
+        )
+        base_guide["common_diseases"] = (
+            f"CROP-SPECIFIC DISEASE WATCH — {crop_name}\n{disease_text}\n"
+            "PREVENTION: Use healthy planting material, rotate with non-host crops where practical, "
+            "remove severely infected material, clean tools between affected areas and maintain "
+            "crop-appropriate spacing and drainage. Confirm the disease with KVK/SAU before treatment. "
+            "Use only currently registered products at label directions when locally recommended."
+        )
+        base_guide["common_pests"] = (
+            f"CROP-SPECIFIC PEST WATCH — {crop_name}\n{pest_text}\n"
+            "PREVENTION: Scout crop plants and field borders, remove confirmed alternate hosts, "
+            "conserve predators and parasitoids, and use suitable traps only where locally advised. "
+            "Record pest counts and crop stage. Intervene only after correct identification and "
+            "a locally verified action threshold. Never use an unregistered pesticide or guessed dose."
+        )
+        base_guide["ipm_guidance"] = (
+            f"INTEGRATED PLAN FOR {crop_name.upper()}\n"
+            f"1. Start with {planting}.\n"
+            "2. Rotate crops where practical and remove diseased residues and volunteer hosts.\n"
+            f"3. Maintain {field}.\n"
+            f"4. Manage water: {water}.\n"
+            f"5. Scout for {scouting}.\n"
+            "6. Remove localised infestations and use sanitation, barriers, traps or biological control when suitable.\n"
+            "7. Conserve beneficial insects and other natural enemies.\n"
+            "8. Use registered plant-protection products only when a confirmed problem exceeds a local action threshold.\n"
+            "Record the date, crop stage, diagnosis and result of each intervention."
+        )
+        base_guide["harvest_guidance"] = (
+            f"Harvest {crop_name} for its {harvest_organ}: {maturity}. "
+            "Harvest in dry conditions where practical. Use clean tools and containers, "
+            "avoid bruising or soil contact, separate damaged produce and move the harvest "
+            "to shade promptly. Cure, dry, grade or cool only as appropriate for this crop."
+        )
+        return base_guide, storage
+
+    guide, crop_storage_advice = build_crop_specific_guidance(
+        selected_crop, guide, crop_to_family.get(selected_crop, "general")
     )
 
-    for market_index, (_, market_row) in enumerate(nearby.iterrows()):
-        market_reference = market_price_rows[
-            market_price_rows["Market"].astype(str).str.casefold()
-            == str(market_row.market).casefold()
-        ]
-        if market_reference.empty:
-            market_reference = market_price_rows[
-                market_price_rows["District"].astype(str).str.casefold()
-                == str(market_row.district).casefold()
-            ]
-        if market_reference.empty:
-            market_reference = market_price_rows[
-                market_price_rows["State"].astype(str).str.casefold()
-                == str(market_row.state).casefold()
-            ]
-        if market_reference.empty:
-            market_reference = market_price_rows
+    # Adapt the existing crop-specific guidance to the farmer's measured conditions.
+    # This changes guidance content only; all existing headings and display formatting remain intact.
+    selected_factor_data = crop_factor_diagnostics.get(selected_crop, {})
 
-        reference_price = float(
-            market_reference["Modal_x0020_Price"].median()
+    land_preparation_notes = []
+    if selected_factor_data.get("Soil type", {}).get("score", 100) < 100:
+        land_preparation_notes.append(
+            "The selected soil type is outside this crop's preferred starter profile; confirm soil depth, texture and drainage with a local soil test or KVK before planting."
         )
-        synthetic_rng = np.random.default_rng(SEED + market_index)
-        trend = np.linspace(-0.06, 0.04, len(synthetic_dates))
-        seasonal_phase = synthetic_rng.uniform(0, 2 * np.pi)
+    if selected_factor_data.get("Soil pH", {}).get("score", 100) <= 45:
+        land_preparation_notes.append(
+            "The entered pH is a major mismatch for this crop; confirm it with a laboratory soil test and use only a locally recommended amendment rate."
+        )
+    if land_preparation_notes:
+        guide["land_preparation"] = "Farm-specific check: " + ". ".join(note.rstrip(".") for note in land_preparation_notes) + ". " + str(guide["land_preparation"])
 
-        for date_index, synthetic_date in enumerate(synthetic_dates):
-            seasonal_factor = 1 + 0.08 * np.sin(
-                2 * np.pi * synthetic_date.month / 12 + seasonal_phase
+    nutrient_notes = []
+    for nutrient_name in ("Nitrogen", "Phosphorus", "Potassium"):
+        nutrient_details = selected_factor_data.get(nutrient_name, {})
+        if nutrient_details and float(nutrient_details.get("score", 100)) <= 45:
+            nutrient_notes.append(
+                f"The entered {nutrient_name.lower()} level ({float(nutrient_details['actual']):.1f} kg/ha) differs substantially from this crop's reference ({float(nutrient_details['target']):.1f} kg/ha); confirm with a soil test before changing fertilizer rates."
             )
-            random_factor = synthetic_rng.normal(1.0, 0.04)
-            synthetic_price = max(
-                1.0,
-                reference_price * (1 + trend[date_index])
-                * seasonal_factor * random_factor
-            )
-            synthetic_market_rows.append({
-                "State": market_row.state,
-                "District": market_row.district,
-                "Market": market_row.market,
-                "Commodity": selected_crop,
-                "Variety": "Synthetic estimate",
-                "Grade": "Synthetic estimate",
-                "Arrival_Date": synthetic_date,
-                "arrival_date_ordinal": synthetic_date.toordinal(),
-                "arrival_month_sin": np.sin(2 * np.pi * synthetic_date.month / 12),
-                "arrival_month_cos": np.cos(2 * np.pi * synthetic_date.month / 12),
-                "Modal_x0020_Price": synthetic_price,
-                "data_source": "synthetic"
-            })
+    if nutrient_notes:
+        guide["nutrient_guidance"] = "Farm-specific nutrient check: " + ". ".join(note.rstrip(".") for note in nutrient_notes) + ". " + str(guide["nutrient_guidance"])
 
-    crop_market_data = pd.DataFrame(synthetic_market_rows)
-    price_estimates_are_synthetic = True
-
-elif not selected_district_virtuals.empty:
-    # Virtual markets have no observed quotations. Build labelled synthetic
-    # histories from available real reference rates so they can be compared
-    # without being represented as actual mandi price records.
-    virtual_price_rows = []
-    virtual_dates = pd.date_range(
-        end=pd.Timestamp(date.today()).normalize(),
-        periods=156,
-        freq="W"
-    )
-
-    for virtual_index, (_, virtual_market) in enumerate(
-        selected_district_virtuals.iterrows()
-    ):
-        # Use the selected crop's real price history as the reference whenever
-        # it exists. This avoids basing a virtual mandi's crop estimate on an
-        # unrelated commodity's price.
-        virtual_reference = crop_market_data[
-            (crop_market_data["State"].astype(str).str.casefold() == state.casefold())
-            & (crop_market_data["District"].astype(str).str.casefold() == district.casefold())
-        ]
-        if virtual_reference.empty:
-            virtual_reference = crop_market_data[
-                crop_market_data["State"].astype(str).str.casefold() == state.casefold()
-            ]
-        if virtual_reference.empty:
-            virtual_reference = crop_market_data
-
-        reference_price = float(virtual_reference["Modal_x0020_Price"].median())
-        virtual_rng = np.random.default_rng(
-            SEED + sum(ord(char) for char in str(virtual_market.market)) + 1709
+    management_notes = []
+    if selected_factor_data.get("Temperature", {}).get("score", 100) <= 45:
+        management_notes.append(
+            "The entered temperature is far from this crop's reference; check the locally recommended sowing window before planting."
         )
-        trend = np.linspace(-0.06, 0.04, len(virtual_dates))
-        seasonal_phase = virtual_rng.uniform(0, 2 * np.pi)
-
-        for date_index, virtual_date in enumerate(virtual_dates):
-            seasonal_factor = 1 + 0.08 * np.sin(
-                2 * np.pi * virtual_date.month / 12 + seasonal_phase
-            )
-            synthetic_price = max(
-                1.0,
-                reference_price * (1 + trend[date_index])
-                * seasonal_factor * virtual_rng.normal(1.0, 0.04)
-            )
-            virtual_price_rows.append({
-                "State": virtual_market.state,
-                "District": virtual_market.district,
-                "Market": virtual_market.market,
-                "Commodity": selected_crop,
-                "Variety": "Synthetic estimate",
-                "Grade": "Synthetic estimate",
-                "Arrival_Date": virtual_date,
-                "arrival_date_ordinal": virtual_date.toordinal(),
-                "arrival_month_sin": np.sin(2 * np.pi * virtual_date.month / 12),
-                "arrival_month_cos": np.cos(2 * np.pi * virtual_date.month / 12),
-                "Modal_x0020_Price": synthetic_price,
-                "data_source": "synthetic_virtual_mandi"
-            })
-
-    if virtual_price_rows:
-        crop_market_data = pd.concat(
-            [crop_market_data, pd.DataFrame(virtual_price_rows)],
-            ignore_index=True
+    if selected_factor_data.get("Water availability", {}).get("score", 100) < 100:
+        management_notes.append(
+            "Available water does not match this crop's reference requirement; confirm a reliable irrigation or water-conservation plan before planting."
         )
+    if selected_factor_data.get("Rainfall", {}).get("score", 100) <= 45:
+        management_notes.append(
+            "The district rainfall baseline is far from this crop's reference; align sowing with the local crop calendar and plan supplemental irrigation or drainage as appropriate."
+        )
+    if management_notes:
+        guide["monitoring"] = "Farm-specific monitoring check: " + ". ".join(note.rstrip(".") for note in management_notes) + ". " + str(guide["monitoring"])
 
 
-def market_date_features(target_date):
-    return np.array([[
-        target_date.toordinal(),
-        np.sin(2 * np.pi * target_date.month / 12),
-        np.cos(2 * np.pi * target_date.month / 12)
-    ]], dtype=float)
-
-
-def predict_market_price_for_date(target_market, target_district, target_state, target_date):
-    """Fit LinearRegression to prior real or synthetic observations for this date.
-
-    Prefer the selected market's own crop history; fall back to district or state
-    history only when a narrower history is too short. Synthetic observations
-    remain labelled as estimates and are never represented as real mandi quotes.
-    """
-    scopes = [
-        ("market", crop_market_data[crop_market_data["Market"].astype(str).str.casefold() == str(target_market).casefold()]),
-        ("district", crop_market_data[crop_market_data["District"].astype(str).str.casefold() == str(target_district).casefold()]),
-        ("state", crop_market_data[crop_market_data["State"].astype(str).str.casefold() == str(target_state).casefold()])
+    sections = [
+        ("1. Land preparation", "land_preparation"),
+        ("2. Fertilizer application", "fertilizer_application"),
+        ("3. Nutrient guidance", "nutrient_guidance"),
+        ("4. Crop monitoring", "monitoring"),
+        ("5. Common diseases — symptoms and prevention", "common_diseases"),
+        ("6. Common pests — damage and prevention", "common_pests"),
+        ("7. Integrated pest management", "ipm_guidance")
     ]
 
-    chosen_history = None
-    chosen_scope = None
-    forecast_cutoff = pd.Timestamp(target_date)
-    for scope_name, scope_rows in scopes:
-        candidate_history = scope_rows[
-            scope_rows["Arrival_Date"] < forecast_cutoff
-        ]
-        if not candidate_history.empty:
-            if chosen_history is None:
-                chosen_history = candidate_history
-                chosen_scope = scope_name
-            if candidate_history["Arrival_Date"].nunique() >= 3:
-                x_values = np.column_stack([
-                    candidate_history["arrival_date_ordinal"].to_numpy(dtype=float),
-                    candidate_history["arrival_month_sin"].to_numpy(dtype=float),
-                    candidate_history["arrival_month_cos"].to_numpy(dtype=float)
-                ])
-                y_values = candidate_history["Modal_x0020_Price"].to_numpy(dtype=float)
-                trend_model = LinearRegression()
-                trend_model.fit(x_values, y_values)
-                predicted = float(trend_model.predict(market_date_features(target_date))[0])
-                if scope_name == "market" and "data_source" in candidate_history.columns:
-                    if candidate_history["data_source"].astype(str).str.startswith("synthetic").all():
-                        return max(0.01, predicted), "linear_regression_synthetic_virtual_mandi"
-                return max(0.01, predicted), f"linear_regression_{scope_name}"
 
-    # A one-day snapshot has no trend. Use only the latest observed real quote
-    # from the narrowest available market/district/state scope as a reference.
-    if chosen_history is None:
-        return np.nan, "unavailable"
-    latest_date = chosen_history["Arrival_Date"].max()
-    latest_rows = chosen_history[chosen_history["Arrival_Date"] == latest_date]
-    if latest_rows.empty:
-        return np.nan, "unavailable"
-    return max(0.01, float(latest_rows["Modal_x0020_Price"].median())), f"last_observed_{chosen_scope}_reference"
+    def concise_guideline(value, section):
+        """Format crop-specific advice as short, readable field instructions."""
+        value = re.sub(r";\s*", ". ", str(value).strip())
+        value = re.sub(r"[ \t]+", " ", value)
 
+        if section == "ipm_guidance":
+            formatted = []
+            for line in value.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                match = re.match(r"^(\d+\.\s*)(.*)$", line)
+                if match:
+                    prefix, content = match.groups()
+                    wrapped = textwrap.fill(
+                        content, width=84,
+                        initial_indent="  " + prefix,
+                        subsequent_indent="     "
+                    )
+                else:
+                    wrapped = textwrap.fill(
+                        line, width=88, initial_indent="  ",
+                        subsequent_indent="  "
+                    )
+                formatted.append(wrapped)
+            return "\n\n".join(formatted)
 
-# ------------------------- SELLING TIME COMPARISON -------------------------
+        if section in {"common_diseases", "common_pests"}:
+            formatted = []
+            for item in value.splitlines():
+                item = item.strip().lstrip("• ")
+                if not item:
+                    continue
+                if item.startswith("CROP-SPECIFIC "):
+                    formatted.append(item)
+                    continue
+                if item.startswith("PREVENTION:"):
+                    formatted.append(textwrap.fill(
+                        item, width=88, initial_indent="  ",
+                        subsequent_indent="  "
+                    ))
+                    continue
+                formatted.append(textwrap.fill(
+                    item, width=88, initial_indent="  • ",
+                    subsequent_indent="    "
+                ))
+            return "\n\n".join(formatted)
 
-selling_options = []
-step = max(1, min(7, shelf_max))
-
-for day_offset in range(0, shelf_max + 1, step):
-    sell_date = harvest_date + timedelta(days=day_offset)
-
-    for _, market_row in nearby.iterrows():
-        price, price_method = predict_market_price_for_date(
-            market_row.market, market_row.district, market_row.state, sell_date
+        paragraphs = [part.strip() for part in re.split(r"\n+", value) if part.strip()]
+        return "\n\n".join(
+            textwrap.fill(part, width=88, subsequent_indent="  ")
+            for part in paragraphs
         )
-        if not np.isfinite(price):
-            continue
-        selling_options.append([
-            market_row.market,
-            sell_date,
-            price,
-            day_offset,
-            price_method
-        ])
 
-options_df = pd.DataFrame(
-    selling_options,
-    columns=[
-        "market", "selling_date", "expected_price",
-        "days_after_harvest", "price_method"
-    ]
-)
 
-if options_df.empty:
-    raise ValueError(
-        "No usable real or synthetic mandi price estimates were available for the selected crop and nearby markets. "
-        "Check that the mandi dataset contains valid market, location and price records."
+    # Display each cultivation point heading in uppercase and centered.
+    GUIDELINE_HEADING_WIDTH = 88
+
+    for heading, column in sections:
+        print("\n" + "-" * GUIDELINE_HEADING_WIDTH)
+        print(heading.upper().center(GUIDELINE_HEADING_WIDTH))
+        print("-" * GUIDELINE_HEADING_WIDTH + "\n")
+        print(concise_guideline(guide[column], column) + "\n")
+
+    # Storage is point 8; each crop receives its own harvested-product handling advice.
+    storage_advice = str(crop_storage_advice).strip().rstrip(". ")
+    storage_advice = storage_advice[:1].upper() + storage_advice[1:] if storage_advice else ""
+    storage_advice = re.sub(r";\s*", ". ", storage_advice)
+    storage_text = (
+        f"For {selected_crop}: {storage_advice}. "
+        "Sort the produce before storage and keep damaged or diseased items separate. "
+        "Use clean, crop-appropriate containers and keep stored produce protected from "
+        "rain, excess moisture, direct sun and pests. Check regularly for mould, softening, "
+        "sprouting or insect damage. Do not seal produce while it is warm or damp."
     )
 
-# ------------------------- REVENUE & PROFIT -------------------------
+    print("8. STORAGE GUIDANCE".center(GUIDELINE_HEADING_WIDTH))
+    print()
+    print(textwrap.fill(storage_text, width=88, subsequent_indent="  ") + "\n")
 
-cost_per_acre = float(
-    rng.uniform(18000, 65000)
-)
+    # Give the farmer a separate, crop-specific harvest instruction in its own box.
+    harvest_text = concise_guideline(
+        guide["harvest_guidance"], "harvest_guidance"
+    ).strip()
+    harvest_box_width = GUIDELINE_HEADING_WIDTH
+    harvest_inner_width = harvest_box_width - 4
+    harvest_lines = textwrap.wrap(
+        harvest_text, width=harvest_inner_width,
+        break_long_words=False, break_on_hyphens=False
+    )
+    print("+" + "-" * (harvest_box_width - 2) + "+")
+    print("|" + " HARVESTING ADVICE ".center(harvest_box_width - 2) + "|")
+    print("|" + " " * (harvest_box_width - 2) + "|")
+    for harvest_line in harvest_lines:
+        print("| " + harvest_line.ljust(harvest_inner_width) + " |")
+    print("+" + "-" * (harvest_box_width - 2) + "+\n")
 
-total_cost = cost_per_acre * land_acres
+    # Illustrative shelf-life estimates
 
-# One tonne = 10 quintals
+    PERISHABLE = {
+        "Tomato": (5, 10),
+        "Banana": (5, 12),
+        "Papaya": (4, 8),
+        "Mango": (5, 12),
+        "Spinach": (2, 5),
+        "Coriander": (2, 5),
+        "Grapes": (7, 21),
+        "Strawberry": (2, 7),
+        "Cucumber": (7, 14),
+        "Brinjal": (5, 10),
+        "Cauliflower": (5, 10),
+        "Cabbage": (10, 30),
+        "Potato": (30, 120),
+        "Onion": (30, 180),
+        "Garlic": (60, 180),
+        "Tea": (1, 2)
+    }
 
-quantity_quintals = total_yield * 10
 
-options_df["estimated_revenue"] = (
-    options_df.expected_price * quantity_quintals
-)
+    # Crop-specific planning shelf-life indices (days) used only for market logistics.
+    # Values are indicative ambient-handling estimates; actual life varies by variety,
+    # maturity, packaging, temperature and cold-chain availability.
+    CROP_SHELF_LIFE_DAYS = {
+        crop: (180 if crop_to_family.get(crop) in {"cereals", "pulses", "oilseeds"}
+               else 60 if crop_to_family.get(crop) in {"fibre", "spices", "plantation"}
+               else 7 if crop_to_family.get(crop) in {"leafy_herbs", "fruit_crops", "cucurbits", "vegetables", "root_vegetables", "other_field_and_vegetable_crops"}
+               else 30)
+        for crop in CROPS
+    }
+    CROP_SHELF_LIFE_DAYS.update({
+        "Tomato": 3, "Spinach": 2, "Coriander": 2, "Strawberry": 2,
+        "Banana": 5, "Papaya": 5, "Mango": 7, "Grapes": 10,
+        "Cucumber": 7, "Brinjal": 5, "Cauliflower": 7, "Cabbage": 14,
+        "Potato": 60, "Onion": 90, "Garlic": 120, "Rice": 180,
+        "Wheat": 180, "Maize": 180, "Chickpea": 180, "Pigeon pea": 180,
+        "Green gram": 180, "Black gram": 180, "Lentil": 180,
+        "Sugarcane": 3
+    })
 
-options_df["estimated_profit"] = (
-    options_df.estimated_revenue - total_cost
-)
+    if selected_crop in PERISHABLE:
+        shelf_min, shelf_max = PERISHABLE[selected_crop]
+        CROP_SHELF_LIFE_DAYS[selected_crop] = int(shelf_max)
+    else:
+        shelf_max = int(CROP_SHELF_LIFE_DAYS.get(selected_crop, 30))
+        shelf_min = max(1, int(round(shelf_max * 0.75)))
 
-best_option = options_df.sort_values(
-    ["estimated_profit", "days_after_harvest"],
-    ascending=[False, True]
-).iloc[0]
+    print(f"\nSuggested sowing date: {sowing_date.strftime('%d %B %Y')}")
+    print(f"Expected harvest date: {harvest_date.strftime('%d %B %Y')}")
+    print(f"Expected shelf life: {shelf_min}–{shelf_max} days")
 
-harvest_day_option = options_df[
-    options_df.days_after_harvest == 0
-].sort_values(
-    "estimated_profit",
-    ascending=False
-).head(1)
+    print("\nGROWTH-STAGE TIMELINE")
 
-immediate = (
-    harvest_day_option.iloc[0]
-    if len(harvest_day_option) > 0
-    else options_df.iloc[0]
-)
+    if selected_crop == "Tea":
+        stages = [
+            ("Plant establishment", 0.15),
+            ("Frame formation and training", 0.40),
+            ("Canopy development", 0.70),
+            ("First plucking readiness", 0.95),
+            ("First commercial plucking", 1.00)
+        ]
+    else:
+        stages = [
+            ("Establishment", 0.10),
+            ("Vegetative growth", 0.35),
+            ("Flowering/reproductive", 0.65),
+            ("Fruit/grain development", 0.85),
+            ("Maturity and harvest", 1.00)
+        ]
 
-# ------------------------- FINAL RECOMMENDATION -------------------------
+    for i, (name, fraction) in enumerate(stages, 1):
 
-print(f"\n\n             Recommended crop: {selected_crop}\n\n")
-print(f"  Suggested sowing date: {sowing_date.strftime('%d %B %Y')}\n")
-print(f"  Expected shelf life: {shelf_min}–{shelf_max} days\n")
-print(f"  Expected harvest date: {harvest_date.strftime('%d %B %Y')}\n")
-print(f"  Recommended selling date: {best_option.selling_date.strftime('%d %B %Y')}\n")
+        stage_day = max(
+            1, int(duration * fraction)
+        )
 
-print("\n  MARKET AND FINANCIAL ESTIMATE")
-print(f"  Recommended market:          {best_option.market}")
-print(f"  Expected price:              ₹{best_option.expected_price:,.0f} per quintal")
-print(f"  Expected revenue:            ₹{best_option.estimated_revenue:,.0f}")
-print(f"  Expected cultivation cost:   ₹{total_cost:,.0f}")
-print("-" * 55)
-print(f"| Estimated profit: ₹{best_option.estimated_profit:,.0f}".ljust(54) + "|")
-print("-" * 55)
-print("\n")
+        stage_date = (
+            sowing_date + timedelta(days=stage_day)
+        )
+
+        print(
+            f"{i}. {name:<27} | "
+            f"{stage_date.strftime('%d %b %Y')}"
+        )
+
+    # ================================================================
+    # MODULE 3: MARKETSENSE
+    # ================================================================
+
+    print("\n" + "=" * 72)
+    print("WHERE AND WHEN TO SELL YOUR HARVEST".center(72))
+    print("=" * 72)
+
+    markets_df["distance_km"] = markets_df.apply(
+        lambda row: haversine_km(
+            lat,
+            lon,
+            row.latitude_approx,
+            row.longitude_approx
+        ),
+        axis=1
+    )
+
+    markets_df = markets_df[
+        markets_df["market_type"] == "Real dataset market"
+    ].copy()
+
+    nearby = (
+        markets_df.sort_values("distance_km")
+        .head(12)
+        .copy()
+    )
+
+    market_names = nearby.market.tolist()
+
+    # ------------------------- REAL MARKET PRICE ESTIMATES -------------------------
+
+    market_commodity_aliases = {
+        "Rice": ["Rice", "Paddy(Common)", "Paddy(Other)"],
+        "Maize": ["Maize"],
+        "Chickpea": ["Chickpea", "Chick Peas", "Bengal Gram(Gram)", "Bengal Gram", "Gram", "Chana", "Kabuli Chana", "Desi Chana"],
+        "Kidney bean": ["Kidney beans", "Beans", "French beans"],
+        "Pigeon pea": ["Pigeon pea", "Arhar (Tur/Red Gram)", "Tur"],
+        "Moth beans": ["Moth beans", "Moth"],
+        "Green gram": ["Green gram", "Green Gram(Moong)", "Moong"],
+        "Black gram": ["Black gram", "Black Gram(Urd Beans)", "Urad"],
+        "Lentil": ["Lentil", "Masur"],
+        "Pomegranate": ["Pomegranate"],
+        "Banana": ["Banana"],
+        "Mango": ["Mango"],
+        "Grapes": ["Grapes"],
+        "Watermelon": ["Watermelon"],
+        "Muskmelon": ["Muskmelon"],
+        "Apple": ["Apple"],
+        "Orange": ["Orange"],
+        "Papaya": ["Papaya"],
+        "Coconut": ["Coconut"],
+        "Cotton": ["Cotton"],
+        "Jute": ["Jute"],
+        "Coffee": ["Coffee"]
+    }
+
+    available_commodities = market_price_rows["Commodity"].dropna().astype(str).unique().tolist()
+    commodity_aliases = market_commodity_aliases.get(selected_crop, [selected_crop])
+    selected_commodity_names = [
+        commodity for commodity in available_commodities
+        if any(commodity.casefold() == alias.casefold() for alias in commodity_aliases)
+    ]
+
+    if not selected_commodity_names:
+        fuzzy_match = process.extractOne(
+            selected_crop, available_commodities, scorer=fuzz.WRatio
+        )
+        if fuzzy_match and fuzzy_match[1] >= 88:
+            selected_commodity_names = [fuzzy_match[0]]
+
+    crop_market_data = market_price_rows[
+        market_price_rows["Commodity"].isin(selected_commodity_names)
+    ].copy()
+
+    if not crop_market_data.empty:
+        # Keep one comparable commodity/variety/grade series instead of mixing
+        # differently graded produce into a single price trend.
+        reference_commodity = str(crop_market_data["Commodity"].mode().iloc[0])
+        commodity_rows = crop_market_data[
+            crop_market_data["Commodity"].astype(str).str.casefold() == reference_commodity.casefold()
+        ].copy()
+        reference_variety = str(commodity_rows["Variety"].mode().iloc[0])
+        variety_rows = commodity_rows[
+            commodity_rows["Variety"].astype(str).str.casefold() == reference_variety.casefold()
+        ].copy()
+        reference_grade = str(variety_rows["Grade"].mode().iloc[0])
+        crop_market_data = variety_rows[
+            variety_rows["Grade"].astype(str).str.casefold() == reference_grade.casefold()
+        ].copy()
+        crop_market_data = crop_market_data.groupby(
+            ["State", "District", "Market", "Commodity", "Variety", "Grade", "Arrival_Date",
+             "arrival_date_ordinal", "arrival_month_sin", "arrival_month_cos"],
+            as_index=False
+        )["Modal_x0020_Price"].median()
+
+    # Restrict market comparisons to markets with real observations for the selected
+    # commodity/variety/grade. If none of the initially nearest markets has such data,
+    # select the nearest markets that do; do not invent prices for unrelated markets.
+    if not crop_market_data.empty:
+        crop_market_keys = crop_market_data[["State", "District", "Market"]].drop_duplicates()
+        nearby_with_crop_history = markets_df.merge(
+            crop_market_keys,
+            left_on=["state", "district", "market"],
+            right_on=["State", "District", "Market"],
+            how="inner"
+        )
+        if not nearby_with_crop_history.empty:
+            nearby = (
+                nearby_with_crop_history.sort_values("distance_km")
+                .head(12)
+                .copy()
+            )
+            market_names = nearby.market.tolist()
+
+    price_estimates_are_synthetic = False
+
+    if crop_market_data.empty:
+        # No crop-specific mandi history was found. Generate clearly labelled
+        # synthetic historical prices using local mandi rates as a reference.
+        # These values are artificial estimates, not observed prices for this crop.
+        synthetic_market_rows = []
+        synthetic_dates = pd.date_range(
+            end=pd.Timestamp(date.today()).normalize(),
+            periods=156,
+            freq="W"
+        )
+
+        for market_index, (_, market_row) in enumerate(nearby.iterrows()):
+            market_reference = market_price_rows[
+                market_price_rows["Market"].astype(str).str.casefold()
+                == str(market_row.market).casefold()
+            ]
+            if market_reference.empty:
+                market_reference = market_price_rows[
+                    market_price_rows["District"].astype(str).str.casefold()
+                    == str(market_row.district).casefold()
+                ]
+            if market_reference.empty:
+                market_reference = market_price_rows[
+                    market_price_rows["State"].astype(str).str.casefold()
+                    == str(market_row.state).casefold()
+                ]
+            if market_reference.empty:
+                market_reference = market_price_rows
+
+            reference_price = float(
+                market_reference["Modal_x0020_Price"].median()
+            )
+            synthetic_rng = np.random.default_rng(SEED + market_index)
+            trend = np.linspace(-0.06, 0.04, len(synthetic_dates))
+            seasonal_phase = synthetic_rng.uniform(0, 2 * np.pi)
+
+            for date_index, synthetic_date in enumerate(synthetic_dates):
+                seasonal_factor = 1 + 0.08 * np.sin(
+                    2 * np.pi * synthetic_date.month / 12 + seasonal_phase
+                )
+                random_factor = synthetic_rng.normal(1.0, 0.04)
+                synthetic_price = max(
+                    1.0,
+                    reference_price * (1 + trend[date_index])
+                    * seasonal_factor * random_factor
+                )
+                synthetic_market_rows.append({
+                    "State": market_row.state,
+                    "District": market_row.district,
+                    "Market": market_row.market,
+                    "Commodity": selected_crop,
+                    "Variety": "Synthetic estimate",
+                    "Grade": "Synthetic estimate",
+                    "Arrival_Date": synthetic_date,
+                    "arrival_date_ordinal": synthetic_date.toordinal(),
+                    "arrival_month_sin": np.sin(2 * np.pi * synthetic_date.month / 12),
+                    "arrival_month_cos": np.cos(2 * np.pi * synthetic_date.month / 12),
+                    "Modal_x0020_Price": synthetic_price,
+                    "data_source": "synthetic"
+                })
+
+        crop_market_data = pd.DataFrame(synthetic_market_rows)
+        price_estimates_are_synthetic = True
+
+    def market_date_features(target_date):
+        return np.array([[
+            target_date.toordinal(),
+            np.sin(2 * np.pi * target_date.month / 12),
+            np.cos(2 * np.pi * target_date.month / 12)
+        ]], dtype=float)
+
+
+    def predict_market_price_for_date(target_market, target_district, target_state, target_date):
+        """Fit LinearRegression to prior real or synthetic observations for this date.
+
+        Prefer the selected market's own crop history; fall back to district or state
+        history only when a narrower history is too short. Synthetic observations
+        remain labelled as estimates and are never represented as real mandi quotes.
+        """
+        scopes = [
+            ("market", crop_market_data[crop_market_data["Market"].astype(str).str.casefold() == str(target_market).casefold()]),
+            ("district", crop_market_data[crop_market_data["District"].astype(str).str.casefold() == str(target_district).casefold()]),
+            ("state", crop_market_data[crop_market_data["State"].astype(str).str.casefold() == str(target_state).casefold()])
+        ]
+
+        chosen_history = None
+        chosen_scope = None
+        forecast_cutoff = pd.Timestamp(target_date)
+        for scope_name, scope_rows in scopes:
+            candidate_history = scope_rows[
+                scope_rows["Arrival_Date"] < forecast_cutoff
+            ]
+            if not candidate_history.empty:
+                if chosen_history is None:
+                    chosen_history = candidate_history
+                    chosen_scope = scope_name
+                if candidate_history["Arrival_Date"].nunique() >= 3:
+                    x_values = np.column_stack([
+                        candidate_history["arrival_date_ordinal"].to_numpy(dtype=float),
+                        candidate_history["arrival_month_sin"].to_numpy(dtype=float),
+                        candidate_history["arrival_month_cos"].to_numpy(dtype=float)
+                    ])
+                    y_values = candidate_history["Modal_x0020_Price"].to_numpy(dtype=float)
+                    trend_model = LinearRegression()
+                    trend_model.fit(x_values, y_values)
+                    predicted = float(trend_model.predict(market_date_features(target_date))[0])
+                    if scope_name == "market" and "data_source" in candidate_history.columns:
+                        if candidate_history["data_source"].astype(str).str.startswith("synthetic").all():
+                            return max(0.01, predicted), "linear_regression_synthetic_estimate"
+                    return max(0.01, predicted), f"linear_regression_{scope_name}"
+
+        # A one-day snapshot has no trend. Use only the latest observed real quote
+        # from the narrowest available market/district/state scope as a reference.
+        if chosen_history is None:
+            return np.nan, "unavailable"
+        latest_date = chosen_history["Arrival_Date"].max()
+        latest_rows = chosen_history[chosen_history["Arrival_Date"] == latest_date]
+        if latest_rows.empty:
+            return np.nan, "unavailable"
+        return max(0.01, float(latest_rows["Modal_x0020_Price"].median())), f"last_observed_{chosen_scope}_reference"
+
+
+    # ------------------------- SELLING TIME COMPARISON -------------------------
+
+    selling_options = []
+    step = 1 if shelf_max <= 3 else max(1, min(7, shelf_max))
+
+    for day_offset in range(0, shelf_max + 1, step):
+        sell_date = harvest_date + timedelta(days=day_offset)
+
+        for _, market_row in nearby.iterrows():
+            price, price_method = predict_market_price_for_date(
+                market_row.market, market_row.district, market_row.state, sell_date
+            )
+            if not np.isfinite(price):
+                continue
+            selling_options.append([
+                market_row.market,
+                market_row.district,
+                market_row.state,
+                sell_date,
+                price,
+                day_offset,
+                price_method
+            ])
+
+    options_df = pd.DataFrame(
+        selling_options,
+        columns=[
+            "market", "district", "state", "selling_date", "expected_price",
+            "days_after_harvest", "price_method"
+        ]
+    )
+
+    if options_df.empty:
+        raise ValueError(
+            "No usable real or synthetic mandi price estimates were available for the selected crop and nearby markets. "
+            "Check that the mandi dataset contains valid market, location and price records."
+        )
+
+    # ------------------------- STANDARD VARIETY SEED / PLANTING-MATERIAL COST -------------------------
+    # Quantities are per acre. Field-crop rates are based on published Indian
+    # agricultural recommendations where available. Certified-seed prices use
+    # government/TNAU schedules where published; remaining horticultural entries
+    # are indicative planning estimates for standard, non-hybrid varieties.
+    # Tuple format: (quantity per acre, unit, price per unit in INR).
+    # For orchard/plantation crops, the unit is planting material (seedlings,
+    # sets, suckers, rhizomes or cuttings), because these crops are not normally
+    # established by broadcasting seed.
+    STANDARD_SEED_INPUTS_PER_ACRE = {
+        "Rice": (25.0, "kg", 37.0),
+        "Wheat": (40.0, "kg", 32.0),
+        "Maize": (8.0, "kg", 43.0),
+        "Sorghum": (5.0, "kg", 63.0),
+        "Pearl millet": (2.0, "kg", 51.0),
+        "Finger millet": (3.0, "kg", 48.0),
+        "Barley": (40.0, "kg", 32.0),
+        "Oats": (32.0, "kg", 45.0),
+        "Chickpea": (25.0, "kg", 107.0),
+        "Pigeon pea": (6.0, "kg", 96.0),
+        "Green gram": (6.0, "kg", 103.0),
+        "Black gram": (6.0, "kg", 100.0),
+        "Lentil": (16.0, "kg", 64.0),
+        "Field pea": (24.0, "kg", 70.0),
+        "Kidney bean": (30.0, "kg", 110.0),
+        "Soybean": (30.0, "kg", 85.0),
+        "Groundnut": (65.0, "kg", 94.0),
+        "Mustard": (2.0, "kg", 90.0),
+        "Sesame": (1.0, "kg", 156.0),
+        "Sunflower": (2.0, "kg", 94.0),
+        "Safflower": (4.0, "kg", 90.0),
+        "Linseed": (10.0, "kg", 85.0),
+        "Castor": (2.5, "kg", 68.0),
+        "Cotton": (7.5, "kg", 190.0),
+        "Jute": (2.5, "kg", 90.0),
+        "Sugarcane": (1600.0, "setts", 0.8),
+        "Potato": (800.0, "kg", 25.0),
+        "Sweet potato": (12000.0, "cuttings", 0.8),
+        "Cassava": (4500.0, "stakes", 0.7),
+        "Onion": (4.0, "kg", 1200.0),
+        "Garlic": (250.0, "kg", 180.0),
+        "Tomato": (80.0, "g", 2.5),
+        "Brinjal": (100.0, "g", 2.0),
+        "Chilli": (120.0, "g", 3.0),
+        "Capsicum": (100.0, "g", 4.0),
+        "Cabbage": (100.0, "g", 2.0),
+        "Cauliflower": (100.0, "g", 2.5),
+        "Broccoli": (100.0, "g", 5.0),
+        "Okra": (4.0, "kg", 250.0),
+        "Cucumber": (1.0, "kg", 900.0),
+        "Pumpkin": (1.0, "kg", 700.0),
+        "Bottle gourd": (1.0, "kg", 900.0),
+        "Bitter gourd": (1.0, "kg", 1800.0),
+        "Ridge gourd": (1.0, "kg", 1600.0),
+        "Watermelon": (1.0, "kg", 2200.0),
+        "Muskmelon": (1.0, "kg", 1800.0),
+        "Carrot": (2.0, "kg", 500.0),
+        "Radish": (2.0, "kg", 300.0),
+        "Beetroot": (2.0, "kg", 450.0),
+        "Turnip": (1.5, "kg", 350.0),
+        "Spinach": (4.0, "kg", 180.0),
+        "Amaranth": (2.0, "kg", 250.0),
+        "Fenugreek": (8.0, "kg", 100.0),
+        "Coriander": (8.0, "kg", 180.0),
+        "Mint": (16000.0, "rooted cuttings", 0.15),
+        "Banana": (700.0, "suckers", 18.0),
+        "Mango": (70.0, "grafts", 120.0),
+        "Papaya": (700.0, "seedlings", 8.0),
+        "Guava": (100.0, "grafts", 80.0),
+        "Citrus": (100.0, "budded plants", 100.0),
+        "Lemon": (100.0, "budded plants", 90.0),
+        "Pomegranate": (500.0, "cuttings/plants", 35.0),
+        "Grapes": (500.0, "rooted cuttings", 25.0),
+        "Apple": (100.0, "grafted plants", 180.0),
+        "Pear": (100.0, "grafted plants", 150.0),
+        "Peach": (100.0, "grafted plants", 120.0),
+        "Plum": (100.0, "grafted plants", 130.0),
+        "Litchi": (70.0, "grafted plants", 180.0),
+        "Pineapple": (18000.0, "suckers/slips", 2.5),
+        "Jackfruit": (70.0, "grafted plants", 150.0),
+        "Coconut": (70.0, "seed nuts/seedlings", 60.0),
+        "Arecanut": (550.0, "seedlings", 18.0),
+        "Cashew": (70.0, "grafts", 100.0),
+        "Coffee": (1100.0, "seedlings", 12.0),
+        "Tea": (6000.0, "clonal cuttings", 2.0),
+        "Turmeric": (800.0, "kg rhizomes", 35.0),
+        "Ginger": (800.0, "kg rhizomes", 45.0),
+        "Black pepper": (550.0, "rooted cuttings", 25.0),
+        "Cardamom": (1800.0, "seedlings", 12.0),
+        "Clove": (70.0, "grafted seedlings", 100.0),
+        "Cocoa": (550.0, "seedlings", 18.0),
+        "Rubber": (70.0, "budded stumps", 180.0),
+        "Aloe vera": (9000.0, "suckers", 1.5),
+        "Marigold": (800.0, "g", 1.0),
+        "Rose": (8000.0, "rooted plants", 8.0),
+        "Jasmine": (4000.0, "rooted cuttings", 5.0),
+        "Tobacco": (100.0, "g", 2.0),
+        "Fodder maize": (16.0, "kg", 43.0),
+        "Lucerne": (8.0, "kg", 450.0),
+        "Berseem": (8.0, "kg", 350.0),
+        "Napier grass": (8000.0, "stem cuttings", 1.0),
+        "Quinoa": (1.5, "kg", 500.0),
+        "Amaranth grain": (1.0, "kg", 250.0),
+        "Moringa": (250.0, "seedlings", 8.0),
+        "Drumstick": (250.0, "seedlings", 8.0),
+        "Strawberry": (18000.0, "runners", 3.0),
+        "Dragon fruit": (1600.0, "cuttings", 15.0),
+        "Avocado": (70.0, "grafted plants", 180.0),
+        "Moth beans": (6.0, "kg", 64.0),
+        "Orange": (100.0, "budded plants", 100.0),
+    }
+
+    if set(STANDARD_SEED_INPUTS_PER_ACRE) != set(CROPS):
+        raise ValueError("Seed-input dataset must contain exactly all 100 project crops.")
+
+    seed_quantity_per_acre, seed_quantity_unit, seed_unit_price = (
+        STANDARD_SEED_INPUTS_PER_ACRE[selected_crop]
+    )
+    seed_cost_per_acre = seed_quantity_per_acre * seed_unit_price
+    total_seed_cost = seed_cost_per_acre * land_acres
+
+    # ------------------------- REVENUE & PROFIT -------------------------
+
+    # Fixed operating-cost rates are applied consistently to every crop.
+    # These are planning assumptions, not live contractor or mandi quotations.
+    FIELD_LABOUR_COST_PER_ACRE = 4500.0
+    HARVESTING_LABOUR_COST_PER_ACRE = 3500.0
+    PACKAGING_COST_PER_QUINTAL = 30.0
+    GRADING_COST_PER_QUINTAL = 15.0
+    TRANSPORT_COST_PER_QUINTAL_KM = 2.50
+    MARKET_CHARGE_PER_QUINTAL = 12.0
+
+    # One tonne = 10 quintals.
+    quantity_quintals = total_yield * 10
+
+    # Acre-based costs scale with cultivated area.
+    field_labour_cost = FIELD_LABOUR_COST_PER_ACRE * land_acres
+    harvesting_labour_cost = HARVESTING_LABOUR_COST_PER_ACRE * land_acres
+
+    # Quantity-based costs scale with estimated harvested production.
+    packaging_cost = PACKAGING_COST_PER_QUINTAL * quantity_quintals
+    grading_cost = GRADING_COST_PER_QUINTAL * quantity_quintals
+    market_charge = MARKET_CHARGE_PER_QUINTAL * quantity_quintals
+
+    # Dynamic post-harvest exposure includes time waiting after harvest,
+    # handling time and estimated road transit to the selected actual mandi.
+    # State-anchor distance is used because the current location catalogue
+    # does not contain precise farm coordinates.
+    market_distance_lookup = (
+        nearby.drop_duplicates(["market", "district", "state"])
+        .set_index(["market", "district", "state"])["distance_km"].to_dict()
+    )
+    assumed_transport_speed_kmph = 35.0
+    handling_buffer_hours = 2.0
+    crop_shelf_life_days = max(1.0, float(CROP_SHELF_LIFE_DAYS.get(selected_crop, 30)))
+    options_df["market_distance_km"] = options_df.apply(
+        lambda row: float(market_distance_lookup.get(
+            (row["market"], row["district"], row["state"]), 0.0
+        )),
+        axis=1
+    )
+    options_df["estimated_transit_hours"] = (
+        options_df["market_distance_km"] / assumed_transport_speed_kmph
+    )
+    options_df["estimated_waiting_hours"] = (
+        options_df["days_after_harvest"] * 24.0 + handling_buffer_hours
+    )
+    options_df["total_postharvest_age_days"] = (
+        options_df["estimated_waiting_hours"]
+        + options_df["estimated_transit_hours"]
+    ) / 24.0
+    options_df["spoilage_penalty_fraction"] = np.clip(
+        options_df["total_postharvest_age_days"] / crop_shelf_life_days,
+        0.0, 0.80
+    )
+
+    # Distance-based transportation costs use fixed rates, never selling-price percentages.
+    options_df["transportation_cost"] = (
+        TRANSPORT_COST_PER_QUINTAL_KM
+        * quantity_quintals
+        * options_df["market_distance_km"]
+    )
+    options_df["total_operating_expenses"] = (
+        field_labour_cost
+        + harvesting_labour_cost
+        + total_seed_cost
+        + packaging_cost
+        + grading_cost
+        + options_df["transportation_cost"]
+        + market_charge
+    )
+
+    # Gross revenue is calculated before the separate perishability deduction.
+    options_df["gross_revenue"] = options_df["expected_price"] * quantity_quintals
+    options_df["perishability_loss_amount"] = (
+        options_df["gross_revenue"] * options_df["spoilage_penalty_fraction"]
+    )
+    options_df["combined_loss_expense_rate"] = np.where(
+        options_df["gross_revenue"] > 0,
+        options_df["total_operating_expenses"] / options_df["gross_revenue"] * 100.0,
+        0.0
+    )
+    options_df["estimated_revenue"] = options_df["gross_revenue"]
+    options_df["estimated_profit"] = (
+        options_df["gross_revenue"]
+        - options_df["perishability_loss_amount"]
+        - options_df["total_operating_expenses"]
+    )
+
+    best_option = options_df.sort_values(
+        ["estimated_profit", "days_after_harvest"],
+        ascending=[False, True]
+    ).iloc[0]
+
+    harvest_day_option = options_df[
+        options_df.days_after_harvest == 0
+    ].sort_values(
+        "estimated_profit",
+        ascending=False
+    ).head(1)
+
+    immediate = (
+        harvest_day_option.iloc[0]
+        if len(harvest_day_option) > 0
+        else options_df.iloc[0]
+    )
+
+    # ------------------------- FINAL RECOMMENDATION -------------------------
+
+    print(f"\nRecommended crop: {selected_crop}")
+    print(f"Recommended selling date: {best_option.selling_date.strftime('%d %B %Y')}\n")
+    financial_lines = [
+        f"  Recommended market:          {best_option.market}",
+        f"  Estimated price:             ₹{best_option.expected_price:,.0f} per quintal",
+        f"  Market distance:             {best_option.market_distance_km:.1f} km",
+        f"  Estimated transit time:      {best_option.estimated_transit_hours:.1f} hours",
+        f"  Expected gross revenue:      ₹{best_option.gross_revenue:,.0f}",
+    ]
+
+    main_column_width = 68
+    expense_box_width = 47
+    expense_inner_width = expense_box_width - 2
+    expense_box_lines = [
+        "+" + "-" * expense_inner_width + "+",
+        "|" + "OPERATING EXPENSE BREAKDOWN".center(expense_inner_width) + "|",
+        "|" + "-" * expense_inner_width + "|",
+        f"| {'Market charges:':<27} ₹{market_charge:>14,.0f} |",
+        f"| {'Transportation cost:':<27} ₹{best_option.transportation_cost:>14,.0f} |",
+        f"| {'Grading cost:':<27} ₹{grading_cost:>14,.0f} |",
+        f"| {'Packaging cost:':<27} ₹{packaging_cost:>14,.0f} |",
+        f"| {'Harvest labour cost:':<27} ₹{harvesting_labour_cost:>14,.0f} |",
+        f"| {'Seed cost:':<27} ₹{total_seed_cost:>14,.0f} |",
+        f"| {'Field labour cost:':<27} ₹{field_labour_cost:>14,.0f} |",
+        "|" + "-" * expense_inner_width + "|",
+        f"| {'Total operating expenses:':<27} ₹{best_option.total_operating_expenses:>14,.0f} |",
+        f"| {'Combined loss expense rate:':<27} {f'({best_option.combined_loss_expense_rate:.1f}%)':>14} |",
+        "+" + "-" * expense_inner_width + "+",
+    ]
+
+    main_side_lines = financial_lines + [
+        f"  Combined loss expense rate: {best_option.combined_loss_expense_rate:.1f}%",
+        f"  Perishability loss estimate: {best_option.spoilage_penalty_fraction * 100:.1f}% "
+        f"(₹{best_option.perishability_loss_amount:,.0f})",
+    ]
+
+    profit_box_width = 55
+    profit_inner_width = profit_box_width - 2
+    profit_text = f"Estimated net profit: ₹{best_option.estimated_profit:,.0f}"
+    profit_box_lines = [
+        "+" + "-" * profit_inner_width + "+",
+        "|" + profit_text.center(profit_inner_width) + "|",
+        "+" + "-" * profit_inner_width + "+",
+    ]
+
+    print("  MARKET AND FINANCIAL ESTIMATE".ljust(main_column_width) + " " + expense_box_lines[0])
+
+    for index, expense_line in enumerate(expense_box_lines[1:]):
+        if index < len(main_side_lines):
+            main_line = main_side_lines[index]
+        elif len(main_side_lines) <= index < len(main_side_lines) + len(profit_box_lines):
+            main_line = profit_box_lines[index - len(main_side_lines)]
+        else:
+            main_line = ""
+        print(main_line.ljust(main_column_width) + " " + expense_line)
+
+    print("\n")
+else:
+    unsuitable_lines = [
+        ("meaning", "No crop is sufficiently suitable or compatible with the supplied soil and farm conditions."),
+        ("threshold", f"All evaluated crops have suitability below {MINIMUM_CROP_SUITABILITY_THRESHOLD:.0f}%."),
+    ]
+
+    factor_names = [
+        "Soil type", "Soil pH", "Nitrogen", "Phosphorus", "Potassium",
+        "Temperature", "Water availability", "Rainfall"
+    ]
+    factor_summary = []
+    for factor_name in factor_names:
+        factor_values = [
+            details[factor_name]
+            for details in crop_factor_diagnostics.values()
+            if factor_name in details
+            and details[factor_name].get("actual") is not None
+        ]
+        if factor_values:
+            best_factor = max(factor_values, key=lambda details: float(details["score"]))
+            average_factor_score = float(np.mean([
+                float(details["score"]) for details in factor_values
+            ]))
+            factor_summary.append((
+                float(best_factor["score"]), average_factor_score,
+                factor_name, best_factor
+            ))
+
+    factor_summary.sort(key=lambda item: (item[0], item[1]))
+    critical_factors = [item for item in factor_summary if item[0] < 60.0]
+    limiting_factors = critical_factors[:3] if critical_factors else factor_summary[:3]
+
+    if not critical_factors:
+        unsuitable_lines.append((
+            "overall",
+            "No single input was a severe mismatch for every crop; the combined effect of several conditions kept all overall scores below the threshold."
+        ))
+
+    remedy_by_factor = {
+        "Soil type": "Prefer crops adapted to the existing soil; verify soil depth, texture and drainage before attempting soil improvement.",
+        "Soil pH": "Confirm pH with a laboratory soil test; use lime for acidic soil or another locally recommended correction for alkaline soil, at a test-based rate.",
+        "Nitrogen": "Confirm available nitrogen with a soil test and follow a crop-stage-specific local recommendation; avoid blanket fertilizer doses.",
+        "Phosphorus": "Confirm available phosphorus with a soil test and apply only the locally recommended amount; avoid repeated application when levels are already high.",
+        "Potassium": "Confirm available potassium with a soil test and apply only the locally recommended amount; avoid unnecessary potash application.",
+        "Temperature": "Review the local crop calendar and shift sowing to a more suitable season; choose a heat- or cool-tolerant crop if the temperature pattern persists.",
+        "Water availability": "If reliable irrigation is unavailable, prioritize lower-water crops and consider rainwater harvesting or efficient irrigation where feasible.",
+        "Rainfall": "Use the district crop calendar to align sowing with rainfall; plan supplemental irrigation or drainage according to the local rainfall pattern."
+    }
+
+    for _, _, factor_name, details in limiting_factors:
+        actual_value = details["actual"]
+        target_value = details["target"]
+        unit = details.get("unit", "")
+        if factor_name == "Soil type":
+            comparison = f"entered {actual_value}; closest crop profiles prefer {target_value}"
+        elif factor_name == "Water availability":
+            comparison = f"entered {actual_value}; closest crop profile requires {target_value}"
+        elif factor_name == "Rainfall":
+            comparison = f"district baseline {float(actual_value):.0f} {unit}; closest crop reference {float(target_value):.0f} {unit}"
+        else:
+            comparison = f"entered {float(actual_value):.1f} {unit}; closest crop reference {float(target_value):.1f} {unit}"
+        unsuitable_lines.append((
+            "factor",
+            f"{factor_name}: {comparison} (best factor match {float(details['score']):.0f}%)."
+        ))
+        unsuitable_lines.append((
+            "action",
+            f"Recommended action: {remedy_by_factor[factor_name]}"
+        ))
+
+    alert_width = 88
+    alert_inner_width = alert_width - 4
+    alert_border = "-" * (alert_width - 2)
+
+    def print_alert_line(message, indent=""):
+        wrapped = textwrap.wrap(
+            str(message), width=alert_inner_width - len(indent),
+            break_long_words=False, break_on_hyphens=False
+        ) or [""]
+        for line in wrapped:
+            print("| " + indent + line.ljust(alert_inner_width - len(indent)) + " |")
+
+    print("\n+" + "=" * (alert_width - 2) + "+")
+    print("|" + "NO SUITABLE CROP IDENTIFIED".center(alert_width - 2) + "|")
+    print("+" + "=" * (alert_width - 2) + "+")
+
+    for category, message in unsuitable_lines:
+        if category == "meaning":
+            print("|" + "ASSESSMENT".center(alert_width - 2) + "|")
+            print("|" + "-" * (alert_width - 2) + "|")
+            print_alert_line(message)
+            print("|" + " " * (alert_width - 2) + "|")
+        elif category == "threshold":
+            print_alert_line(message)
+            print("|" + " " * (alert_width - 2) + "|")
+        elif category == "overall":
+            print("|" + "OVERALL RESULT".center(alert_width - 2) + "|")
+            print("|" + "-" * (alert_width - 2) + "|")
+            print_alert_line(message)
+            print("|" + " " * (alert_width - 2) + "|")
+
+    print("|" + "MAIN LIMITING FACTORS".center(alert_width - 2) + "|")
+    print("|" + "-" * (alert_width - 2) + "|")
+    for category, message in unsuitable_lines:
+        if category == "factor":
+            print_alert_line(message, "• ")
+        elif category == "action":
+            print_alert_line(message, "  ")
+            print("|" + " " * (alert_width - 2) + "|")
+
+    print("+" + "=" * (alert_width - 2) + "+\n")
+
+
+if "best_option" in locals() and float(best_option.estimated_profit) < 0:
+    warning_width = 66
+    warning_inner_width = warning_width - 2
+    warning_profit_text = (
+        f"Estimated Net Profit: -₹{abs(float(best_option.estimated_profit)):,.0f}"
+    )
+
+    print("\n+" + "-" * warning_inner_width + "+")
+    print("|" + " " * warning_inner_width + "|")
+    print("|" + "ECONOMIC VIABILITY WARNING".center(warning_inner_width) + "|")
+    print("|" + " " * warning_inner_width + "|")
+    print("|" + "The estimated outcome indicates a financial loss.".center(warning_inner_width) + "|")
+    print("|" + " " * warning_inner_width + "|")
+    print("|" + warning_profit_text.center(warning_inner_width) + "|")
+    print("|" + " " * warning_inner_width + "|")
+    print("+" + "-" * warning_inner_width + "+\n")
+
 print("=" * 60)
 print(" " * 19 + "THANK YOU FOR USING")
 print(" " * 21 + "AgriLink.AI")
